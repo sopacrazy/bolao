@@ -265,7 +265,7 @@ const mockRanking = Array.from({ length: 59 }, (_, i) => ({
   .map((p, i) => ({ ...p, position: i + 1 }));
 mockRanking[0].name = 'Marcos';
 
-const finance = { participants: 59, ticketPrice: 30 };
+const finance = { participants: 0, ticketPrice: 0 };
 const gross    = finance.participants * finance.ticketPrice;
 const expenses = { work: gross * 0.15, commission: gross * 0.1 };
 const net      = gross - expenses.work - expenses.commission;
@@ -1036,50 +1036,10 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   return (
     <div className="pb-4 space-y-3">
 
-      {/* ── Seletor de liga ── */}
-      <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
-        {(Object.entries(LEAGUES) as [League, typeof LEAGUES[League]][]).map(([key, lg]) => {
-          const active = league === key;
-          return (
-            <button key={key} onClick={() => setLeague(key)}
-              className="flex-1 py-2.5 rounded-xl text-xs font-black transition-all relative"
-              style={{ color: active ? '#0C1120' : T.textMuted(d) }}>
-              {active && (
-                <motion.div layoutId="leagueTab" className="absolute inset-0 rounded-xl"
-                  style={{ background: lg.color }} transition={{ type: 'spring', damping: 30, stiffness: 350 }} />
-              )}
-              <span className="relative z-10">{lg.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* ── Seletor de liga (oculto) ── */}
 
       {/* ── Navegação de rodadas ── */}
-      {isSerieC ? (
-        /* Série C: alterna próximos / passados */
-        <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
-          style={{ background: T.surface(d), borderColor: T.border(d) }}>
-          <button onClick={() => setShowPast(true)} disabled={loading}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
-            style={{ background: T.elevated(d), opacity: showPast ? 1 : 0.3 }}>
-            <ChevronLeft size={16} style={{ color: T.text(d) }} />
-          </button>
-          <div className="text-center">
-            <p className="font-black text-sm" style={{ color: T.text(d) }}>
-              {loading ? 'Carregando...' : data?.roundNumber !== '?' ? `Rodada ${data?.roundNumber}` : 'Série C'}
-            </p>
-            <p className="text-[10px]" style={{ color: showPast ? '#6366F1' : '#22C55E' }}>
-              {showPast ? 'Resultados passados' : 'Próximos jogos'}
-            </p>
-          </div>
-          <button onClick={() => setShowPast(false)} disabled={loading || !showPast}
-            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
-            style={{ background: T.elevated(d) }}>
-            <ChevronRight size={16} style={{ color: T.text(d) }} />
-          </button>
-        </div>
-      ) : (
-        /* Série A: navegação por data */
+      {/* Série A: navegação por data */}
         <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
           style={{ background: T.surface(d), borderColor: T.border(d) }}>
           <button onClick={goBack}
@@ -1108,7 +1068,6 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
             <ChevronRight size={16} style={{ color: T.text(d) }} />
           </button>
         </div>
-      )}
 
       {/* Progress (só mostra na rodada atual) */}
       {isCurrentRound && (
@@ -1120,8 +1079,11 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
           </p>
           <p className="text-xs mt-0.5 flex items-center gap-1.5" style={{ color: T.textMuted(d) }}>
             <Wifi size={11} className="text-emerald-400" />
-            {isSerieC ? 'TheSportsDB' : 'ESPN'} • <span className="font-bold" style={{ color: LEAGUES[league].color }}>{LEAGUES[league].label}</span>
+            ESPN • <span className="font-bold" style={{ color: LEAGUES['bra.1'].color }}>Série A</span>
           </p>
+        </div>
+        <div className="px-3 py-1.5 rounded-xl" style={{ background: T.elevated(d), border: `1px solid ${T.border(d)}` }}>
+          <p className="text-xs font-black" style={{ color: T.textMuted(d) }}>0 pts</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={refetch}
@@ -1174,38 +1136,32 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
               <StatusBadge status={match.status} clock={match.clock} closed={closed} />
             </div>
 
-            <div className="flex items-center px-4 pb-4 pt-2 gap-2">
+            <div className="flex items-center px-4 pb-4 pt-2 gap-3">
               {/* Home */}
-              <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
                 <TeamLogo src={match.homeLogo} abbr={match.home} isDark={isDark} />
-                <span className="text-[11px] font-medium text-center leading-tight" style={{ color: T.textMuted(d) }}>{match.homeName}</span>
+                <span className="text-xs font-bold truncate" style={{ color: T.text(d) }}>{match.homeName}</span>
               </div>
 
-              {/* Center: score input or final score */}
-              <div className="flex items-center gap-2">
+              {/* Center: score */}
+              <div className="flex items-center gap-2 shrink-0">
                 {closed || live ? (
-                  // Show real score
-                  <div className="flex items-center gap-2">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
-                      style={{ background: T.elevated(d), color: T.text(d) }}>
-                      {match.homeScore}
-                    </div>
+                  <>
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black"
+                      style={{ background: T.elevated(d), color: T.text(d) }}>{match.homeScore}</div>
                     <div className="flex flex-col items-center gap-0.5">
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                     </div>
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black"
-                      style={{ background: T.elevated(d), color: T.text(d) }}>
-                      {match.awayScore}
-                    </div>
-                  </div>
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg font-black"
+                      style={{ background: T.elevated(d), color: T.text(d) }}>{match.awayScore}</div>
+                  </>
                 ) : (
-                  // Bet inputs
                   <>
                     <input type="text" inputMode="numeric" pattern="[0-9]*" value={sh} placeholder=""
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'home', e.target.value)}
-                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
+                      className="w-10 h-10 rounded-xl text-center text-lg font-black outline-none transition-all disabled:opacity-80"
                       style={{ background: sh ? 'rgba(251,191,36,0.12)' : T.inputBg(d), border: `1.5px solid ${sh ? 'rgba(251,191,36,0.4)' : T.inputBdr(d)}`, color: T.text(d) }}
                     />
                     <div className="flex flex-col items-center gap-0.5">
@@ -1215,7 +1171,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                     <input type="text" inputMode="numeric" pattern="[0-9]*" value={sa} placeholder=""
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'away', e.target.value)}
-                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
+                      className="w-10 h-10 rounded-xl text-center text-lg font-black outline-none transition-all disabled:opacity-80"
                       style={{ background: sa ? 'rgba(251,191,36,0.12)' : T.inputBg(d), border: `1.5px solid ${sa ? 'rgba(251,191,36,0.4)' : T.inputBdr(d)}`, color: T.text(d) }}
                     />
                   </>
@@ -1223,9 +1179,9 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
               </div>
 
               {/* Away */}
-              <div className="flex-1 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+                <span className="text-xs font-bold truncate text-right" style={{ color: T.text(d) }}>{match.awayName}</span>
                 <TeamLogo src={match.awayLogo} abbr={match.away} isDark={isDark} />
-                <span className="text-[11px] font-medium text-center leading-tight" style={{ color: T.textMuted(d) }}>{match.awayName}</span>
               </div>
             </div>
 
@@ -1315,10 +1271,6 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
          </div>
       ) : null}
 
-      {/* Hint */}
-      <p className="text-center text-[10px] pb-2" style={{ color: T.textMuted(d) }}>
-        Toque em um jogo para ver estatísticas
-      </p>
 
       {/* Success Overlay */}
       <AnimatePresence>
@@ -1766,8 +1718,14 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   const handleDeleteBets = async () => {
     if (!confirmDelete) return;
     setDeleting(true);
-    await supabase.from('palpites').delete().eq('usuario_id', confirmDelete.id);
+    const { error } = await supabase.from('palpites').delete().eq('usuario_id', confirmDelete.id);
     setDeleting(false);
+    if (error) {
+      console.error('[Bolão] Erro ao excluir palpites:', error);
+      alert(`Erro ao excluir: ${error.message}\n\nVerifique as políticas RLS da tabela palpites no Supabase.`);
+      setConfirmDelete(null);
+      return;
+    }
     setConfirmDelete(null);
     setSelectedUser(null);
     fetchData();
@@ -1883,53 +1841,14 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
           <motion.div key="jogos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
              <div className="p-4 rounded-2xl border bg-amber-400/5 border-amber-400/20">
                 <p className="text-xs font-bold text-amber-400 uppercase mb-1">Curadoria de Rodada</p>
-                <p className="text-[11px]" style={{ color: T.textMuted(d) }}>
-                  {admLeague === 'bra.1' ? 'Selecione os jogos da ESPN para aparecerem.' : 'Selecione os jogos da Série C (TheSportsDB) para aparecerem.'}
-                </p>
+                <p className="text-[11px]" style={{ color: T.textMuted(d) }}>Selecione os jogos da ESPN para aparecerem.</p>
              </div>
-
-             {/* Liga selector no admin */}
-             <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
-               {(Object.entries(LEAGUES) as [League, typeof LEAGUES[League]][]).map(([key, lg]) => {
-                 const active = admLeague === key;
-                 return (
-                   <button key={key} onClick={() => setAdmLeague(key)}
-                     className="flex-1 py-2 rounded-xl text-xs font-black transition-all relative"
-                     style={{ color: active ? '#0C1120' : T.textMuted(d) }}>
-                     {active && (
-                       <motion.div layoutId="admLeagueTab" className="absolute inset-0 rounded-xl"
-                         style={{ background: lg.color }} transition={{ type: 'spring', damping: 30, stiffness: 350 }} />
-                     )}
-                     <span className="relative z-10">{lg.label}</span>
-                   </button>
-                 );
-               })}
-             </div>
-
-             {/* Navegação passado/próximo para Série C */}
-             {admLeague === 'bra.3' && (
-               <div className="flex items-center justify-between">
-                 <button onClick={() => setAdmShowPast(true)}
-                   className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-                   style={{ background: admShowPast ? LEAGUES['bra.3'].color + '20' : T.elevated(d), color: admShowPast ? LEAGUES['bra.3'].color : T.textMuted(d) }}>
-                   <ChevronLeft size={14} /> Passados
-                 </button>
-                 <button onClick={() => setAdmShowPast(false)}
-                   className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
-                   style={{ background: !admShowPast ? LEAGUES['bra.3'].color + '20' : T.elevated(d), color: !admShowPast ? LEAGUES['bra.3'].color : T.textMuted(d) }}>
-                   Próximos <ChevronRight size={14} />
-                 </button>
-               </div>
-             )}
 
              {/* Lista de jogos */}
-             {serieCAdmLoading && admLeague === 'bra.3' ? (
-               <div className="flex justify-center py-8"><RefreshCw size={20} className="animate-spin" style={{ color: T.textMuted(d) }} /></div>
-             ) : (
-               <div className="space-y-3">
-                 {(admMatches ?? []).map(m => {
+             <div className="space-y-3">
+               {(roundData?.matches ?? []).map(m => {
                    const isSelected = selectedMatchIds.includes(m.id);
-                   const leagueColor = LEAGUES[admLeague].color;
+                   const leagueColor = LEAGUES['bra.1'].color;
                    return (
                      <div key={m.id} className="p-3 rounded-2xl border flex items-center justify-between"
                        style={{ background: isSelected ? leagueColor + '0D' : T.surface(d), borderColor: isSelected ? leagueColor + '4D' : T.border(d) }}>
@@ -1951,11 +1870,10 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                      </div>
                    );
                  })}
-                 {(admMatches ?? []).length === 0 && (
+                 {(roundData?.matches ?? []).length === 0 && (
                    <p className="text-center py-8 text-xs" style={{ color: T.textMuted(d) }}>Nenhum jogo encontrado.</p>
                  )}
                </div>
-             )}
           </motion.div>
         )}
       </AnimatePresence>
