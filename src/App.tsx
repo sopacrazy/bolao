@@ -4,7 +4,7 @@ import {
   Trophy, Target, Info, Share2, LogIn, AlertCircle,
   Crown, Medal, Award, Users, TrendingUp, ChevronRight, ChevronLeft,
   Star, Flame, Shield, Swords, Sun, Moon, LogOut, RefreshCw, Wifi, WifiOff,
-  X, MapPin, BarChart2,
+  X, MapPin, BarChart2, List,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -262,6 +262,11 @@ interface MatchSummary {
   venue?: string;
   homeStats: Array<{ label: string; value: string }>;
   awayStats: Array<{ label: string; value: string }>;
+  homeOdds?: string;
+  awayOdds?: string;
+  drawOdds?: string;
+  homeRecord?: string;
+  awayRecord?: string;
 }
 
 const STAT_MAP: Record<string, string> = {
@@ -281,6 +286,8 @@ function useMatchSummary(eventId: string | null) {
     fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/summary?event=${eventId}`)
       .then(r => r.json())
       .then(json => {
+        console.log('[Bolão] ESPN summary:', json);
+
         const pred = json.predictor;
         let homeChance: number | undefined, awayChance: number | undefined;
         if (pred) {
@@ -289,33 +296,67 @@ function useMatchSummary(eventId: string | null) {
           if (!isNaN(h) && !isNaN(a)) { homeChance = h; awayChance = a; }
         }
 
+        // Form: try both structures ESPN uses
         const l5 = json.lastFiveGames ?? [];
-        const homeLast5: string[] = (l5[0]?.events ?? []).slice(0, 5).map((e: any) => e.gameResult ?? '?');
-        const awayLast5: string[] = (l5[1]?.events ?? []).slice(0, 5).map((e: any) => e.gameResult ?? '?');
+        const mapForm = (arr: any[]) =>
+          arr.slice(0, 5).map((e: any) => e.gameResult ?? e.result ?? '?');
+        const homeLast5: string[] = mapForm(l5[0]?.events ?? l5[0]?.games ?? []);
+        const awayLast5: string[] = mapForm(l5[1]?.events ?? l5[1]?.games ?? []);
+
+        // H2H: multiple fallbacks for team name
+        const teamName = (t: any) =>
+          t?.team?.abbreviation ||
+          t?.team?.shortDisplayName ||
+          (t?.team?.displayName ? t.team.displayName.substring(0, 3).toUpperCase() : '?');
 
         const h2h = (json.headToHeadGames ?? []).slice(0, 5).map((g: any) => {
           const comp = g.competitions?.[0] ?? g;
-          const comps: any[] = comp.competitors ?? [];
+          const comps: any[] = comp.competitors ?? g.competitors ?? [];
           const home = comps.find((c: any) => c.homeAway === 'home') ?? comps[0] ?? {};
           const away = comps.find((c: any) => c.homeAway === 'away') ?? comps[1] ?? {};
           const hs = parseInt(home.score ?? '-1'), as_ = parseInt(away.score ?? '-1');
           return {
-            homeTeam: home.team?.abbreviation ?? '?', awayTeam: away.team?.abbreviation ?? '?',
+            homeTeam: teamName(home), awayTeam: teamName(away),
             homeScore: home.score ?? '-', awayScore: away.score ?? '-',
-            date: comp.date ?? '', homeWinner: hs > as_ && hs >= 0,
+            date: comp.date ?? g.date ?? '', homeWinner: hs > as_ && hs >= 0,
             drawResult: hs === as_ && hs >= 0,
           };
         });
 
+        // Live match stats
         const teams: any[] = json.boxscore?.teams ?? [];
         const buildStats = (t: any) =>
           Object.keys(STAT_MAP)
             .map(name => { const s = (t.statistics ?? []).find((x: any) => x.name === name); return s ? { label: STAT_MAP[name], value: s.displayValue } : null; })
             .filter(Boolean) as Array<{ label: string; value: string }>;
 
+        // Odds from ESPN (provider varies)
+        const oddsArr: any[] = json.odds ?? [];
+        const odds = oddsArr[0];
+        let homeOdds: string | undefined, awayOdds: string | undefined, drawOdds: string | undefined;
+        if (odds) {
+          homeOdds = odds.homeTeamOdds?.moneyLine != null ? (odds.homeTeamOdds.moneyLine > 0 ? `+${odds.homeTeamOdds.moneyLine}` : String(odds.homeTeamOdds.moneyLine)) : odds.homeTeamOdds?.value;
+          awayOdds = odds.awayTeamOdds?.moneyLine != null ? (odds.awayTeamOdds.moneyLine > 0 ? `+${odds.awayTeamOdds.moneyLine}` : String(odds.awayTeamOdds.moneyLine)) : odds.awayTeamOdds?.value;
+          drawOdds = odds.drawOdds?.moneyLine != null ? (odds.drawOdds.moneyLine > 0 ? `+${odds.drawOdds.moneyLine}` : String(odds.drawOdds.moneyLine)) : odds.drawOdds?.value;
+        }
+
+        // Season record from team info
+        const infoTeams: any[] = json.teams ?? [];
+        const fmtRecord = (t: any) => {
+          const r = t?.record?.items?.[0]?.stats;
+          if (!r) return undefined;
+          const w = r.find((s: any) => s.name === 'wins')?.value ?? 0;
+          const d_ = r.find((s: any) => s.name === 'draws' || s.name === 'ties')?.value ?? 0;
+          const l = r.find((s: any) => s.name === 'losses')?.value ?? 0;
+          return w || d_ || l ? `${w}V ${d_}E ${l}D` : undefined;
+        };
+        const homeRecord = fmtRecord(infoTeams[0]);
+        const awayRecord = fmtRecord(infoTeams[1]);
+
         setData({ homeChance, awayChance, homeLast5, awayLast5, h2h,
           venue: json.gameInfo?.venue?.fullName,
-          homeStats: buildStats(teams[0] ?? {}), awayStats: buildStats(teams[1] ?? {}) });
+          homeStats: buildStats(teams[0] ?? {}), awayStats: buildStats(teams[1] ?? {}),
+          homeOdds, awayOdds, drawOdds, homeRecord, awayRecord });
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
@@ -534,6 +575,46 @@ function MatchModal({ match, isDark, onClose }: { match: Match; isDark: boolean;
                   </div>
                 )}
 
+                {/* Odds de apostas */}
+                {(data.homeOdds || data.awayOdds || data.drawOdds) && (
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
+                      Odds (moneyline)
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: match.homeName, value: data.homeOdds, color: '#22C55E' },
+                        { label: 'Empate', value: data.drawOdds, color: '#F59E0B' },
+                        { label: match.awayName, value: data.awayOdds, color: '#6366F1' },
+                      ].map(({ label, value, color }) => value ? (
+                        <div key={label} className="flex flex-col items-center p-2.5 rounded-xl gap-1"
+                          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
+                          <span className="font-black text-base" style={{ color }}>{value}</span>
+                          <span className="text-[10px] text-center leading-tight truncate w-full text-center" style={{ color: T.textMuted(d) }}>{label}</span>
+                        </div>
+                      ) : null)}
+                    </div>
+                  </div>
+                )}
+
+                {/* Recorde da temporada */}
+                {(data.homeRecord || data.awayRecord) && (
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
+                      Campeonato Brasileiro 2025
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[{ name: match.homeName, rec: data.homeRecord }, { name: match.awayName, rec: data.awayRecord }].map(({ name, rec }) => rec ? (
+                        <div key={name} className="flex flex-col items-center p-3 rounded-xl gap-1"
+                          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
+                          <span className="font-black text-sm" style={{ color: T.text(d) }}>{rec}</span>
+                          <span className="text-[10px] text-center" style={{ color: T.textMuted(d) }}>{name}</span>
+                        </div>
+                      ) : null)}
+                    </div>
+                  </div>
+                )}
+
                 {/* Estádio */}
                 {data.venue && (
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
@@ -543,6 +624,249 @@ function MatchModal({ match, isDark, onClose }: { match: Match; isDark: boolean;
                   </div>
                 )}
               </>
+            )}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+// ─── Standings ────────────────────────────────────────────────────────────────
+
+interface StandingEntry {
+  pos: number;
+  teamAbbr: string;
+  teamName: string;
+  teamLogo: string;
+  played: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  gf: number;
+  ga: number;
+  gd: number;
+  points: number;
+}
+
+const STANDINGS_CACHE_KEY = 'bolao_standings_v3';
+const STANDINGS_TTL = 30 * 60 * 1000;
+
+function useStandings() {
+  const [data,    setData]    = useState<StandingEntry[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    try {
+      const raw = localStorage.getItem(STANDINGS_CACHE_KEY);
+      if (raw) {
+        const { payload, ts } = JSON.parse(raw);
+        if (Date.now() - ts < STANDINGS_TTL) { setData(payload); setLoading(false); return; }
+      }
+    } catch {}
+
+    const tryFetch = (url: string) => fetch(url).then(r => { if (!r.ok) throw new Error(r.status.toString()); return r.json(); });
+    const yr = new Date().getFullYear();
+
+    // Tenta múltiplos endpoints ESPN com ano dinâmico
+    Promise.any([
+      tryFetch(`https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}&seasontype=2`),
+      tryFetch(`https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}`),
+      tryFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/standings?season=${yr}&seasontype=2`),
+      tryFetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/standings`),
+    ])
+      .then(json => {
+        console.log('[Bolão] Standings raw:', JSON.stringify(json).substring(0, 300));
+        // ESPN pode retornar entries direto ou dentro de standings/children/groups/season
+        const findEntries = (o: any, depth = 0): any[] => {
+          if (!o || typeof o !== 'object' || depth > 6) return [];
+          if (Array.isArray(o.entries) && o.entries.length > 5) return o.entries;
+          if (Array.isArray(o) && o.length > 5 && o[0]?.team) return o;
+          for (const key of Object.keys(o)) {
+            if (Array.isArray(o[key])) continue; // skip arrays at top (not entries)
+            const found = findEntries(o[key], depth + 1);
+            if (found.length) return found;
+          }
+          // also try arrays
+          for (const key of Object.keys(o)) {
+            if (!Array.isArray(o[key])) continue;
+            if (o[key].length > 5 && o[key][0]?.team) return o[key];
+          }
+          return [];
+        };
+        const entries: any[] = findEntries(json);
+        console.log('[Bolão] Standings entries found:', entries.length, entries[0]);
+        if (entries.length === 0) throw new Error('no entries');
+
+        const getStat = (stats: any[], ...names: string[]) => {
+          for (const name of names) {
+            const s = stats.find((x: any) => x.name === name || x.abbreviation === name);
+            if (s != null) return parseFloat(s.value) || 0;
+          }
+          return 0;
+        };
+
+        const parsed: StandingEntry[] = entries.map((e: any, i: number) => {
+          const stats: any[] = e.stats ?? [];
+          const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? '';
+          return {
+            pos:      i + 1,
+            teamAbbr: e.team?.abbreviation ?? '?',
+            teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? '?',
+            teamLogo: logo,
+            played:   getStat(stats, 'gamesPlayed', 'GP', 'P'),
+            wins:     getStat(stats, 'wins', 'W'),
+            draws:    getStat(stats, 'ties', 'draws', 'D'),
+            losses:   getStat(stats, 'losses', 'L'),
+            gf:       getStat(stats, 'pointsFor', 'GF', 'goalsFor'),
+            ga:       getStat(stats, 'pointsAgainst', 'GA', 'goalsAgainst'),
+            gd:       getStat(stats, 'pointDifferential', 'GD', 'goalDifferential'),
+            points:   getStat(stats, 'points', 'PTS', 'pts'),
+          };
+        });
+
+        localStorage.setItem(STANDINGS_CACHE_KEY, JSON.stringify({ payload: parsed, ts: Date.now() }));
+        setData(parsed);
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { data, loading, error };
+}
+
+function StandingsModal({ isDark, onClose }: { isDark: boolean; onClose: () => void }) {
+  const d = isDark;
+  const { data, loading, error } = useStandings();
+
+  return (
+    <AnimatePresence>
+      <motion.div className="fixed inset-0 z-[100] flex flex-col justify-end"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
+        <motion.div
+          className="relative z-10 rounded-t-3xl overflow-hidden flex flex-col w-full max-w-lg mx-auto"
+          style={{ background: T.bg(d), maxHeight: '92dvh' }}
+          initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+          transition={{ type: 'spring', damping: 30, stiffness: 320 }}>
+
+          {/* Handle */}
+          <div className="flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-10 h-1 rounded-full" style={{ background: T.border(d) }} />
+          </div>
+
+          {/* Header */}
+          <div className="px-5 pt-2 pb-4 shrink-0" style={{ borderBottom: `1px solid ${T.border(d)}` }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Trophy size={14} className="text-amber-400" />
+                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textMuted(d) }}>
+                  Brasileirão Série A 2025
+                </p>
+              </div>
+              <button onClick={onClose}
+                className="w-7 h-7 rounded-full flex items-center justify-center"
+                style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
+                <X size={13} style={{ color: T.textMuted(d) }} />
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-4 py-4">
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <motion.div className="w-9 h-9 rounded-full border-2 border-amber-400/20 border-t-amber-400"
+                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
+                <p className="text-xs" style={{ color: T.textMuted(d) }}>Carregando classificação...</p>
+              </div>
+            )}
+
+            {error && (
+              <div className="text-center py-12 space-y-2">
+                <WifiOff size={28} className="mx-auto text-slate-400" />
+                <p className="text-sm font-medium" style={{ color: T.textMuted(d) }}>Classificação indisponível</p>
+              </div>
+            )}
+
+            {data && data.length > 0 && (
+              <div>
+                {/* Column headers */}
+                <div className="flex items-center px-2 pb-2 text-[9px] font-bold uppercase tracking-wider" style={{ color: T.textMuted(d) }}>
+                  <span className="w-6 shrink-0">#</span>
+                  <span className="flex-1">Clube</span>
+                  <span className="w-6 text-center shrink-0">J</span>
+                  <span className="w-6 text-center shrink-0">V</span>
+                  <span className="w-6 text-center shrink-0">E</span>
+                  <span className="w-6 text-center shrink-0">D</span>
+                  <span className="w-8 text-center shrink-0">SG</span>
+                  <span className="w-8 text-right shrink-0 font-black text-[10px]">Pts</span>
+                </div>
+
+                <div className="space-y-1">
+                  {data.map((entry, i) => {
+                    const isLibertadores  = entry.pos <= 4;
+                    const isSulAmericana  = entry.pos >= 5 && entry.pos <= 6;
+                    const isRelegation    = entry.pos >= data.length - 3;
+                    const rowBg = isLibertadores
+                      ? (d ? 'rgba(34,197,94,0.06)' : 'rgba(34,197,94,0.05)')
+                      : isRelegation
+                      ? (d ? 'rgba(248,113,113,0.06)' : 'rgba(248,113,113,0.05)')
+                      : T.rankItem(d);
+                    const posColor = isLibertadores ? '#22C55E' : isSulAmericana ? '#6366F1' : isRelegation ? '#F87171' : T.textMuted(d);
+
+                    return (
+                      <motion.div key={entry.teamAbbr}
+                        initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.02 }}
+                        className="flex items-center px-2 py-2 rounded-xl"
+                        style={{ background: rowBg, border: `1px solid ${T.rankBdr(d)}` }}>
+
+                        {/* Position stripe */}
+                        <div className="w-1 self-stretch rounded-full mr-2 shrink-0"
+                          style={{ background: isLibertadores ? '#22C55E' : isSulAmericana ? '#6366F1' : isRelegation ? '#F87171' : 'transparent' }} />
+
+                        <span className="w-5 text-xs font-black shrink-0" style={{ color: posColor }}>{entry.pos}</span>
+
+                        <div className="flex-1 flex items-center gap-1.5 min-w-0">
+                          {entry.teamLogo
+                            ? <img src={entry.teamLogo} alt={entry.teamAbbr} className="w-5 h-5 object-contain shrink-0" />
+                            : <div className="w-5 h-5 rounded flex items-center justify-center text-[8px] font-black shrink-0"
+                                style={{ background: T.avatarBg(d), color: T.text(d) }}>{entry.teamAbbr.substring(0, 2)}</div>
+                          }
+                          <span className="text-xs font-semibold truncate" style={{ color: T.text(d) }}>{entry.teamName}</span>
+                        </div>
+
+                        <span className="w-6 text-center text-[11px] shrink-0" style={{ color: T.textMuted(d) }}>{entry.played}</span>
+                        <span className="w-6 text-center text-[11px] font-bold shrink-0" style={{ color: T.text(d) }}>{entry.wins}</span>
+                        <span className="w-6 text-center text-[11px] shrink-0" style={{ color: T.textMuted(d) }}>{entry.draws}</span>
+                        <span className="w-6 text-center text-[11px] shrink-0" style={{ color: T.textMuted(d) }}>{entry.losses}</span>
+                        <span className="w-8 text-center text-[11px] font-bold shrink-0"
+                          style={{ color: entry.gd > 0 ? '#22C55E' : entry.gd < 0 ? '#F87171' : T.textMuted(d) }}>
+                          {entry.gd > 0 ? '+' : ''}{entry.gd}
+                        </span>
+                        <span className="w-8 text-right text-sm font-black shrink-0" style={{ color: T.text(d) }}>{entry.points}</span>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+
+                {/* Legend */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 pt-4 pb-2">
+                  {[
+                    { color: '#22C55E', label: 'Libertadores (1–4)' },
+                    { color: '#6366F1', label: 'Sul-Americana (5–6)' },
+                    { color: '#F87171', label: 'Rebaixamento (17–20)' },
+                  ].map(({ color, label }) => (
+                    <div key={label} className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                      <span className="text-[10px]" style={{ color: T.textMuted(d) }}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         </motion.div>
@@ -1161,10 +1485,11 @@ const headerContent: Record<Tab, { title: string; sub: string }> = {
 };
 
 export default function App() {
-  const [tab,         setTab]         = useState<Tab>('apostar');
-  const [auth,        setAuth]        = useState(false);
-  const [isDark,      setIsDark]      = useState(false);
-  const [roundNumber, setRoundNumber] = useState<number | string>('...');
+  const [tab,            setTab]            = useState<Tab>('apostar');
+  const [auth,           setAuth]           = useState(false);
+  const [isDark,         setIsDark]         = useState(false);
+  const [roundNumber,    setRoundNumber]    = useState<number | string>('...');
+  const [showStandings,  setShowStandings]  = useState(false);
   const d = isDark;
 
   if (!auth) return <Login onLogin={() => setAuth(true)} isDark={isDark} toggleTheme={() => setIsDark(v => !v)} />;
@@ -1192,6 +1517,12 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 ml-3 shrink-0">
+            <button onClick={() => setShowStandings(true)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+              title="Classificação Brasileirão">
+              <List size={15} style={{ color: T.textMuted(d) }} />
+            </button>
             <button onClick={() => setIsDark(v => !v)}
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
               style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
@@ -1255,6 +1586,11 @@ export default function App() {
           })}
         </div>
       </nav>
+
+      {/* Classificação Brasileirão */}
+      {showStandings && (
+        <StandingsModal isDark={isDark} onClose={() => setShowStandings(false)} />
+      )}
     </div>
   );
 }
