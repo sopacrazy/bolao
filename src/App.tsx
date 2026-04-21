@@ -62,19 +62,39 @@ function parseMatches(events: any[]): Match[] {
   });
 }
 
-async function espnFetchUrl(url: string): Promise<{ matches: Match[]; roundNumber: number | string }> {
-  const res = await fetch(url);
+async function espnFetchWeek(week: number): Promise<RodadaData> {
+  const res = await fetch(`${ESPN_BASE}?week=${week}&seasontype=2`);
   if (!res.ok) throw new Error('ESPN error');
   const json = await res.json();
-  const roundNumber: number | string =
-    json.week?.number ??
-    json.leagues?.[0]?.season?.type?.week?.number ??
-    '?';
-  return { matches: parseMatches(json.events ?? []), roundNumber };
+  return { matches: parseMatches(json.events ?? []), roundNumber: week };
 }
 
-// week=null → detecta rodada atual/próxima; week=N → busca rodada específica
-function useRodada(week: number | null) {
+// Descobre a rodada "viva" (atual ou próxima) via endpoint padrão da ESPN
+async function detectLiveWeek(): Promise<number> {
+  const today  = new Date();
+  const future = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+  // Tenta com range de datas primeiro (próximas 2 semanas)
+  const r1 = await fetch(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(future)}`);
+  const j1 = await r1.json();
+  const w1: number | undefined = j1.week?.number;
+  if (w1) return w1;
+
+  // Fallback: endpoint padrão
+  const r2 = await fetch(ESPN_BASE);
+  const j2 = await r2.json();
+  const w2: number | undefined = j2.week?.number;
+  if (w2) {
+    // Se todos encerrados, avança uma rodada
+    const events = j2.events ?? [];
+    const allDone = events.length > 0 && events.every((e: any) => e.status?.type?.name === 'STATUS_FINAL');
+    return allDone ? w2 + 1 : w2;
+  }
+
+  return 1;
+}
+
+function useRodada(week: number) {
   const [data,    setData]    = useState<RodadaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(false);
@@ -82,55 +102,25 @@ function useRodada(week: number | null) {
   const load = async (force = false) => {
     setLoading(true);
     setError(false);
-
-    const cacheKey = week !== null ? `${CACHE_KEY}_w${week}` : CACHE_KEY;
-
+    const cacheKey = `${CACHE_KEY}_w${week}`;
     if (!force) {
       try {
         const raw = localStorage.getItem(cacheKey);
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
-          if (Date.now() - ts < CACHE_TTL) {
-            setData(payload);
-            setLoading(false);
-            return;
-          }
+          if (Date.now() - ts < CACHE_TTL) { setData(payload); setLoading(false); return; }
         }
       } catch {}
     }
-
     try {
-      let result: { matches: Match[]; roundNumber: number | string };
-
-      if (week !== null) {
-        // Rodada específica (navegação histórica)
-        result = await espnFetchUrl(`${ESPN_BASE}?week=${week}&seasontype=2`);
-      } else {
-        // Detecta próxima rodada por intervalo de datas
-        const today  = new Date();
-        const future = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-        result = await espnFetchUrl(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(future)}`);
-
-        if (result.matches.length === 0)
-          result = await espnFetchUrl(ESPN_BASE);
-
-        if (result.matches.length === 0) {
-          const far = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-          result = await espnFetchUrl(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(far)}`);
-        }
-      }
-
+      const result = await espnFetchWeek(week);
       localStorage.setItem(cacheKey, JSON.stringify({ payload: result, ts: Date.now() }));
       setData(result);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError(true); }
+    finally   { setLoading(false); }
   };
 
   useEffect(() => { load(); }, [week]);
-
   return { data, loading, error, refetch: () => load(true) };
 }
 
@@ -351,34 +341,28 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
 function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: number | string) => void }) {
   const d = isDark;
 
-  // null = rodada atual/próxima; número = rodada histórica
-  const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
-  // guarda o número da rodada "atual" detectada para limitar navegação futura
-  const [baseWeek, setBaseWeek] = useState<number | null>(null);
+  const [liveWeek,  setLiveWeek]  = useState<number>(0);   // rodada "ao vivo" detectada
+  const [viewWeek,  setViewWeek]  = useState<number>(0);   // rodada sendo exibida
+  const [detected,  setDetected]  = useState(false);       // já detectou?
 
-  const { data, loading, error, refetch } = useRodada(selectedWeek);
+  // Detecta rodada ao vivo uma única vez
+  useEffect(() => {
+    detectLiveWeek().then(w => {
+      setLiveWeek(w);
+      setViewWeek(w);
+      setDetected(true);
+    });
+  }, []);
+
+  const { data, loading, error, refetch } = useRodada(viewWeek || 1);
 
   useEffect(() => {
-    if (data?.roundNumber && typeof data.roundNumber === 'number') {
-      onRoundLoad(data.roundNumber);
-      // salva a rodada base apenas na carga inicial
-      if (selectedWeek === null) setBaseWeek(data.roundNumber);
-    } else if (data?.roundNumber) {
-      onRoundLoad(data.roundNumber);
-    }
-  }, [data?.roundNumber]);
+    if (viewWeek) onRoundLoad(viewWeek);
+  }, [viewWeek]);
 
-  const goBack = () => {
-    const cur = typeof data?.roundNumber === 'number' ? data.roundNumber : baseWeek;
-    if (cur && cur > 1) setSelectedWeek(cur - 1);
-  };
-  const goForward = () => {
-    const cur = typeof data?.roundNumber === 'number' ? data.roundNumber : baseWeek;
-    if (cur && baseWeek && cur < baseWeek) setSelectedWeek(cur + 1);
-  };
-  const goToBase = () => setSelectedWeek(null);
-
-  const isHistorico = selectedWeek !== null && baseWeek !== null && selectedWeek < baseWeek;
+  const isHistorico = viewWeek < liveWeek;
+  const goBack    = () => { if (viewWeek > 1)        setViewWeek(v => v - 1); };
+  const goForward = () => { if (viewWeek < liveWeek) setViewWeek(v => v + 1); };
 
   type ScoreMap = Record<string, { home: string; away: string }>;
   const [scores,    setScores]    = useState<ScoreMap>({});
@@ -454,16 +438,16 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         <button onClick={goBack}
           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
           style={{ background: T.elevated(d) }}
-          disabled={loading || !baseWeek || (typeof data?.roundNumber === 'number' && data.roundNumber <= 1)}>
+          disabled={loading || !detected || viewWeek <= 1}>
           <ChevronLeft size={16} style={{ color: T.text(d) }} />
         </button>
 
         <div className="text-center">
           <p className="font-black text-sm" style={{ color: T.text(d) }}>
-            Rodada {data?.roundNumber ?? '...'}
+            {detected ? `Rodada ${viewWeek}` : 'Carregando...'}
           </p>
           {isHistorico ? (
-            <button onClick={goToBase}
+            <button onClick={() => setViewWeek(liveWeek)}
               className="text-[10px] font-bold text-amber-400 underline underline-offset-2">
               Ir para atual
             </button>
@@ -475,7 +459,7 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         <button onClick={goForward}
           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
           style={{ background: T.elevated(d) }}
-          disabled={loading || !isHistorico}>
+          disabled={loading || !detected || !isHistorico}>
           <ChevronRight size={16} style={{ color: T.text(d) }} />
         </button>
       </div>
