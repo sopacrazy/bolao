@@ -842,7 +842,8 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
 
   // Para Série C: "rodada atual" = próximos jogos (não passados)
   const isCurrentRound = isSerieC ? !showPast : anchorTs >= todayMidnight() - 86400000;
-  const [liberatedIds,  setLiberatedIds]  = useState<string[]>([]);
+  const [liberatedIds,     setLiberatedIds]     = useState<string[]>([]);
+  const [liberatedLoading, setLiberatedLoading] = useState(true);
   type ScoreMap = Record<string, { home: string; away: string }>;
   const [scores,      setScores]      = useState<ScoreMap>({});
   const [showSuccess, setShowSuccess] = useState(false);
@@ -865,12 +866,14 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   }, [data?.roundNumber, anchorTs, league]);
 
   const fetchLiberated = async () => {
+    setLiberatedLoading(true);
     const { data: libData } = await supabase
       .from('jogos_selecionados')
       .select('match_id')
       .eq('liberado', true)
       .eq('league', league);
     if (libData) setLiberatedIds(libData.map(x => x.match_id));
+    setLiberatedLoading(false);
   };
 
   useEffect(() => {
@@ -979,7 +982,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   const canSubmit     = openMatches.length > 0 && filledCount === openMatches.length;
 
   // ── Loading skeleton ──
-  if (loading) return (
+  if (loading || liberatedLoading) return (
     <div className="pb-4 space-y-3">
       <div className="rounded-xl p-4 flex items-center justify-between border animate-pulse"
         style={{ background: T.surface(d), borderColor: T.border(d) }}>
@@ -1711,6 +1714,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
 
   // Controle de jogos selecionados
@@ -1731,11 +1736,13 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   const fetchData = async () => {
     setLoading(true);
     const { data: pendUsers } = await supabase.from('usuarios').select('*').eq('status', 'pendente');
-    const { data: appUsers } = await supabase.from('usuarios').select('*').eq('status', 'aprovado').neq('cargo', 'Adm');
+    const { data: appUsers }  = await supabase.from('usuarios').select('*').eq('status', 'aprovado').neq('cargo', 'Adm');
+    const { data: betsData }  = await supabase.from('palpites').select('usuario_id');
     const { data: selMatches } = await supabase.from('jogos_selecionados').select('match_id').eq('league', admLeague);
-    
+
+    const usersWithBets = new Set((betsData || []).map((b: any) => b.usuario_id));
     setPending(pendUsers || []);
-    setUsers(appUsers || []);
+    setUsers((appUsers || []).filter(u => usersWithBets.has(u.id)));
     setSelectedMatchIds((selMatches || []).map(m => m.match_id));
     setLoading(false);
   };
@@ -1753,6 +1760,16 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
 
   const handleAction = async (id: string, newStatus: 'aprovado' | 'recusado') => {
     await supabase.from('usuarios').update({ status: newStatus }).eq('id', id);
+    fetchData();
+  };
+
+  const handleDeleteBets = async () => {
+    if (!confirmDelete) return;
+    setDeleting(true);
+    await supabase.from('palpites').delete().eq('usuario_id', confirmDelete.id);
+    setDeleting(false);
+    setConfirmDelete(null);
+    setSelectedUser(null);
     fetchData();
   };
 
@@ -1818,16 +1835,23 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 <button onClick={() => setSelectedUser(null)} className="flex items-center gap-2 text-xs font-bold" style={{ color: T.textMuted(d) }}>
                   <ChevronLeft size={14} /> Voltar para lista
                 </button>
-                
+
                 <div className="p-4 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm" style={{ background: T.elevated(d), color: T.text(d) }}>
-                      {selectedUser.nome[0]}{selectedUser.sobrenome[0]}
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm" style={{ background: T.elevated(d), color: T.text(d) }}>
+                        {selectedUser.nome[0]}{selectedUser.sobrenome[0]}
+                      </div>
+                      <div>
+                        <p className="font-black text-base" style={{ color: T.text(d) }}>{selectedUser.nome} {selectedUser.sobrenome}</p>
+                        <p className="text-xs" style={{ color: T.textMuted(d) }}>Palpites de @{selectedUser.apelido}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-black text-base" style={{ color: T.text(d) }}>{selectedUser.nome} {selectedUser.sobrenome}</p>
-                      <p className="text-xs" style={{ color: T.textMuted(d) }}>Palpites de @{selectedUser.apelido}</p>
-                    </div>
+                    <button onClick={() => setConfirmDelete(selectedUser)}
+                      className="px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95"
+                      style={{ background: 'rgba(248,113,113,0.1)', color: '#F87171', border: '1px solid rgba(248,113,113,0.2)' }}>
+                      Excluir
+                    </button>
                   </div>
                 </div>
 
@@ -1932,6 +1956,46 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                  )}
                </div>
              )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation dialog — excluir palpites */}
+      <AnimatePresence>
+        {confirmDelete && (
+          <motion.div className="fixed inset-0 z-[200] flex items-end justify-center pb-6 px-4"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setConfirmDelete(null)} />
+            <motion.div className="relative z-10 w-full max-w-sm rounded-3xl p-6 space-y-5"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+              initial={{ y: 60, scale: 0.95 }} animate={{ y: 0, scale: 1 }} exit={{ y: 60, scale: 0.95 }}
+              transition={{ type: 'spring', damping: 30, stiffness: 320 }}>
+              <div className="flex flex-col items-center gap-3 text-center">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                  <span className="text-2xl">🗑️</span>
+                </div>
+                <div>
+                  <p className="font-black text-base" style={{ color: T.text(d) }}>Excluir palpites?</p>
+                  <p className="text-sm mt-1" style={{ color: T.textMuted(d) }}>
+                    Todos os palpites de <span className="font-bold" style={{ color: T.text(d) }}>{confirmDelete.nome}</span> serão removidos permanentemente.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setConfirmDelete(null)} disabled={deleting}
+                  className="flex-1 py-3 rounded-2xl font-black text-sm transition-all active:scale-95"
+                  style={{ background: T.elevated(d), color: T.textMuted(d), border: `1px solid ${T.border(d)}` }}>
+                  Cancelar
+                </button>
+                <button onClick={handleDeleteBets} disabled={deleting}
+                  className="flex-1 py-3 rounded-2xl font-black text-sm transition-all active:scale-95 flex items-center justify-center gap-2"
+                  style={{ background: 'linear-gradient(135deg,#F87171,#EF4444)', color: '#fff' }}>
+                  {deleting ? <RefreshCw size={14} className="animate-spin" /> : null}
+                  {deleting ? 'Excluindo...' : 'Excluir'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
