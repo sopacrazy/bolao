@@ -7,6 +7,7 @@ import {
   X, MapPin, BarChart2, List,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { domToPng } from 'modern-screenshot';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1174,8 +1175,56 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   const [showSuccess, setShowSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
-
+  const [sharedFile, setSharedFile] = useState<File | null>(null);
+  const shareRef = React.useRef<HTMLDivElement>(null);
   const matches = data?.matches ?? [];
+
+  // Pré-gera a imagem para contornar a exigência de "User Gesture" no mobile
+  useEffect(() => {
+    if (isLocked && matches.length > 0 && !sharedFile) {
+      const timer = setTimeout(async () => {
+        if (!shareRef.current) return;
+        try {
+          const dataUrl = await domToPng(shareRef.current, {
+            backgroundColor: isDark ? '#0C1120' : '#FFFFFF',
+            scale: 2,
+            quality: 1
+          });
+          const res = await fetch(dataUrl);
+          const blob = await res.blob();
+          setSharedFile(new File([blob], 'meus-palpites.png', { type: 'image/png' }));
+        } catch (e) {
+          console.error('[Bolão] Falha na pré-geração:', e);
+        }
+      }, 1000); // pequeno delay para garantir render
+      return () => clearTimeout(timer);
+    }
+  }, [isLocked, matches.length, isDark]);
+
+  const handleShareImage = async () => {
+    if (!sharedFile) {
+      alert('A imagem ainda está sendo preparada. Tente novamente em um segundo!');
+      return;
+    }
+    
+    try {
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [sharedFile] })) {
+        await navigator.share({
+          files: [sharedFile],
+          title: 'Meus Palpites - Bolão dos Clássicos',
+          text: `Confira meus palpites para a rodada! 🏆`
+        });
+      } else {
+        const link = document.createElement('a');
+        link.download = 'meus-palpites.png';
+        link.href = URL.createObjectURL(sharedFile);
+        link.click();
+      }
+    } catch (err) {
+      console.error('[Bolão] Erro ao compartilhar:', err);
+    }
+  };
+
 
   const setScore = (id: string, side: 'home' | 'away', val: string) =>
     setScores(s => ({ ...s, [id]: { ...(s[id] ?? { home: '', away: '' }), [side]: val.replace(/\D/g, '').slice(0, 2) } }));
@@ -1409,11 +1458,21 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
         <div className="pt-2">
           <AnimatePresence mode="wait">
             {isLocked ? (
-              <motion.div key="locked" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-emerald-400 text-sm border shadow-lg"
-                style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.3)' }}>
-                <Shield size={16} fill="currentColor" /> Palpites Confirmados
-              </motion.div>
+              <div className="space-y-2">
+                <motion.div key="locked" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                  className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-emerald-400 text-sm border shadow-lg"
+                  style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.3)' }}>
+                  <Shield size={16} fill="currentColor" /> Palpites Confirmados
+                </motion.div>
+                
+                <button onClick={handleShareImage}
+                  disabled={!sharedFile}
+                  className="w-full py-3.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-95 border disabled:opacity-50"
+                  style={{ background: T.surface(d), borderColor: T.border(d), color: T.text(d) }}>
+                  <Share2 size={14} className={sharedFile ? "text-amber-400" : "animate-pulse"} /> 
+                  {sharedFile ? "Compartilhar imagem dos palpites" : "Preparando imagem..."}
+                </button>
+              </div>
             ) : (
               <button key="btn" 
                 onClick={async () => {
@@ -1493,14 +1552,61 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                 Seus palpites foram registrados e bloqueados para sua segurança. Boa sorte na rodada! 🍀
               </p>
 
+              <button onClick={handleShareImage}
+                className="w-full py-4 rounded-2xl font-black text-sm bg-emerald-500 text-slate-950 transition-all active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 mb-3">
+                <Share2 size={18} /> Compartilhar Palpites
+              </button>
+
               <button onClick={() => setShowSuccess(false)}
-                className="w-full py-4 rounded-2xl font-black text-sm bg-emerald-500 text-slate-950 transition-all active:scale-95 shadow-lg shadow-emerald-500/20">
-                Entendido
+                className="w-full py-3 rounded-2xl font-bold text-xs transition-all active:scale-95"
+                style={{ color: T.textMuted(d) }}>
+                Voltar
               </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Hidden Share Card */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0 }}>
+        <div ref={shareRef} className="p-8 w-[400px]" style={{ background: T.bg(d), color: T.text(d) }}>
+          <div className="text-center mb-8">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">Bolão dos Clássicos</p>
+            <h2 className="text-2xl font-black tracking-tight">Meus Palpites</h2>
+            {user?.apelido && <p className="text-amber-400 font-bold text-sm mt-1">@{user.apelido}</p>}
+          </div>
+
+          <div className="space-y-4">
+            {matches.map(m => {
+              const bet = scores[m.id];
+              if (!bet) return null;
+              return (
+                <div key={m.id} className="p-4 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1 flex items-center gap-3">
+                      <img src={m.homeLogo} className="w-6 h-6 object-contain" alt="" />
+                      <span className="text-xs font-bold">{m.home}</span>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-400/10 text-amber-400">
+                      <span className="font-black text-sm">{bet.home}</span>
+                      <span className="text-[10px] opacity-40">×</span>
+                      <span className="font-black text-sm">{bet.away}</span>
+                    </div>
+                    <div className="flex-1 flex items-center gap-3 justify-end">
+                      <span className="text-xs font-bold">{m.away}</span>
+                      <img src={m.awayLogo} className="w-6 h-6 object-contain" alt="" />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-8 pt-6 border-t text-center opacity-30" style={{ borderColor: T.border(d) }}>
+            <p className="text-[10px] font-bold">Gerado em bolao-dos-classicos.vercel.app</p>
+          </div>
+        </div>
+      </div>
 
       {/* Modal de estatísticas */}
       {selectedMatch && (
