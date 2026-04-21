@@ -4,7 +4,7 @@ import {
   Trophy, Target, Info, Share2, LogIn, AlertCircle,
   Crown, Medal, Award, Users, TrendingUp, ChevronRight, ChevronLeft,
   Star, Flame, Shield, Swords, Sun, Moon, LogOut, RefreshCw, Wifi, WifiOff, Send,
-  X, MapPin, BarChart2, List,
+  X, List,
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { domToPng } from 'modern-screenshot';
@@ -33,7 +33,15 @@ interface RodadaData {
 
 // ─── ESPN API ─────────────────────────────────────────────────────────────────
 
-const ESPN_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/scoreboard';
+type League = 'bra.1' | 'bra.3';
+
+const LEAGUES: Record<League, { label: string; short: string; color: string }> = {
+  'bra.1': { label: 'Série A', short: 'A', color: '#22C55E' },
+  'bra.3': { label: 'Série C', short: 'C', color: '#6366F1' },
+};
+
+const espnBase   = (lg: League) => `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard`;
+const espnSummary = (lg: League) => `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/summary`;
 const CACHE_KEY = 'bolao_espn_v3';
 const CACHE_TTL = 60 * 60 * 1000; // 1h
 
@@ -79,8 +87,8 @@ function extractRound(events: any[]): number | string {
   return '?';
 }
 
-async function espnDateRange(start: Date, end: Date): Promise<RodadaData> {
-  const res  = await fetch(`${ESPN_BASE}?dates=${ymd(start)}-${ymd(end)}`);
+async function espnDateRange(start: Date, end: Date, lg: League = 'bra.1'): Promise<RodadaData> {
+  const res  = await fetch(`${espnBase(lg)}?dates=${ymd(start)}-${ymd(end)}`);
   if (!res.ok) throw new Error();
   const json = await res.json();
   const roundNumber =
@@ -95,7 +103,7 @@ function todayMidnight() {
 }
 
 // anchorTs: timestamp do "centro" da janela de busca
-function useRodada(anchorTs: number) {
+function useRodada(anchorTs: number, league: League = 'bra.1') {
   const [data,    setData]    = useState<RodadaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(false);
@@ -103,7 +111,7 @@ function useRodada(anchorTs: number) {
   const load = async (force = false) => {
     setLoading(true);
     setError(false);
-    const cacheKey = `${CACHE_KEY}_${anchorTs}`;
+    const cacheKey = `${CACHE_KEY}_${league}_${anchorTs}`;
 
     if (!force) {
       try {
@@ -123,11 +131,11 @@ function useRodada(anchorTs: number) {
       if (isCurrent) {
         // Janela atual: de hoje até +14 dias
         const future = new Date(anchor.getTime() + 14 * 86400000);
-        result = await espnDateRange(anchor, future);
+        result = await espnDateRange(anchor, future, league);
 
         // Fallback ao endpoint padrão (pode ter jogo ao vivo)
         if (result.matches.length === 0) {
-          const res  = await fetch(ESPN_BASE);
+          const res  = await fetch(espnBase(league));
           const json = await res.json();
           result = {
             matches: parseMatches(json.events ?? []),
@@ -138,13 +146,13 @@ function useRodada(anchorTs: number) {
         // Tenta estender para 30 dias
         if (result.matches.length === 0) {
           const far = new Date(anchor.getTime() + 30 * 86400000);
-          result = await espnDateRange(anchor, far);
+          result = await espnDateRange(anchor, far, league);
         }
       } else {
         // Histórico: janela de 8 dias centrada no anchor
         const start = new Date(anchor.getTime() - 3 * 86400000);
         const end   = new Date(anchor.getTime() + 5 * 86400000);
-        result = await espnDateRange(start, end);
+        result = await espnDateRange(start, end, league);
       }
 
       localStorage.setItem(cacheKey, JSON.stringify({ payload: result, ts: Date.now() }));
@@ -156,7 +164,93 @@ function useRodada(anchorTs: number) {
     }
   };
 
-  useEffect(() => { load(); }, [anchorTs]);
+  useEffect(() => { load(); }, [anchorTs, league]);
+  return { data, loading, error, refetch: () => load(true) };
+}
+
+// ─── TheSportsDB — Série C ───────────────────────────────────────────────────
+
+const TSDB_BASE    = 'https://www.thesportsdb.com/api/v1/json/123';
+const TSDB_LEAGUE  = '4625';
+const TSDB_CACHE   = 'bolao_seriesc_v1';
+const TSDB_TTL     = 30 * 60 * 1000; // 30 min
+
+const TSDB_STATUS: Record<string, string> = {
+  NS:  'STATUS_SCHEDULED',
+  '1H': 'STATUS_IN_PROGRESS',
+  HT:  'STATUS_HALFTIME',
+  '2H': 'STATUS_IN_PROGRESS',
+  ET:  'STATUS_IN_PROGRESS',
+  FT:  'STATUS_FINAL',
+  AET: 'STATUS_FINAL',
+  PEN: 'STATUS_FINAL',
+  CANC:'STATUS_CANCELED',
+  PPD: 'STATUS_POSTPONED',
+};
+
+function parseTsdbEvents(events: any[]): Match[] {
+  return events.map((ev: any) => {
+    const dateStr = ev.dateEvent && ev.strTime
+      ? `${ev.dateEvent}T${ev.strTime}Z`
+      : ev.dateEvent ?? '';
+    const homeScore = ev.intHomeScore != null ? String(ev.intHomeScore) : '-';
+    const awayScore = ev.intAwayScore != null ? String(ev.intAwayScore) : '-';
+    return {
+      id:        String(ev.idEvent),
+      home:      (ev.strHomeTeam ?? '?').substring(0, 3).toUpperCase(),
+      away:      (ev.strAwayTeam ?? '?').substring(0, 3).toUpperCase(),
+      homeName:  ev.strHomeTeam ?? '?',
+      awayName:  ev.strAwayTeam ?? '?',
+      homeLogo:  ev.strHomeTeamBadge ?? ev.strTeamHomeBadge ?? '',
+      awayLogo:  ev.strAwayTeamBadge ?? ev.strTeamAwayBadge ?? '',
+      homeScore,
+      awayScore,
+      date:      dateStr,
+      status:    TSDB_STATUS[ev.strStatus ?? 'NS'] ?? 'STATUS_SCHEDULED',
+      clock:     ev.strProgress ?? '',
+    };
+  });
+}
+
+function useSerieCRodada(showPast: boolean) {
+  const [data,    setData]    = useState<RodadaData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(false);
+
+  const load = async (force = false) => {
+    setLoading(true); setError(false);
+    const cacheKey = `${TSDB_CACHE}_${showPast ? 'past' : 'next'}`;
+
+    if (!force) {
+      try {
+        const raw = localStorage.getItem(cacheKey);
+        if (raw) {
+          const { payload, ts } = JSON.parse(raw);
+          if (Date.now() - ts < TSDB_TTL) { setData(payload); setLoading(false); return; }
+        }
+      } catch {}
+    }
+
+    try {
+      const endpoint = showPast ? 'eventspastleague' : 'eventsnextleague';
+      const res  = await fetch(`${TSDB_BASE}/${endpoint}.php?id=${TSDB_LEAGUE}`);
+      if (!res.ok) throw new Error();
+      const json = await res.json();
+      const events: any[] = json.events ?? [];
+      const matches = parseTsdbEvents(events);
+      // TheSportsDB returns mixed rounds — group by the first round found
+      const roundNumber = events[0]?.intRound ?? '?';
+      const result: RodadaData = { matches, roundNumber };
+      localStorage.setItem(cacheKey, JSON.stringify({ payload: result, ts: Date.now() }));
+      setData(result);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [showPast]);
   return { data, loading, error, refetch: () => load(true) };
 }
 
@@ -253,386 +347,6 @@ function TeamLogo({ src, abbr, isDark }: { src: string; abbr: string; isDark: bo
   );
 }
 
-// ─── Match stats hook ─────────────────────────────────────────────────────────
-
-interface MatchSummary {
-  homeChance?: number;
-  awayChance?: number;
-  homeLast5: string[];
-  awayLast5: string[];
-  h2h: Array<{ homeTeam: string; awayTeam: string; homeScore: string; awayScore: string; date: string; homeWinner: boolean; drawResult: boolean }>;
-  venue?: string;
-  homeStats: Array<{ label: string; value: string }>;
-  awayStats: Array<{ label: string; value: string }>;
-  homeOdds?: string;
-  awayOdds?: string;
-  drawOdds?: string;
-  homeRecord?: string;
-  awayRecord?: string;
-}
-
-const STAT_MAP: Record<string, string> = {
-  possessionPct: 'Posse de bola', shotsOnTarget: 'Chutes no gol',
-  totalShots: 'Total de chutes', fouls: 'Faltas', yellowCards: 'Cartões amarelos',
-  redCards: 'Cartões vermelhos', cornerKicks: 'Escanteios', offsides: 'Impedimentos',
-};
-
-function useMatchSummary(eventId: string | null) {
-  const [data,    setData]    = useState<MatchSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(false);
-
-  useEffect(() => {
-    if (!eventId) return;
-    setLoading(true); setData(null); setError(false);
-    fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/summary?event=${eventId}`)
-      .then(r => r.json())
-      .then(json => {
-        console.log('[Bolão] ESPN summary:', json);
-
-        const pred = json.predictor;
-        let homeChance: number | undefined, awayChance: number | undefined;
-        if (pred) {
-          const h = parseFloat(pred.homeTeam?.teamChancePct ?? pred.homeTeam?.gameProjection ?? '');
-          const a = parseFloat(pred.awayTeam?.teamChancePct ?? pred.awayTeam?.gameProjection ?? '');
-          if (!isNaN(h) && !isNaN(a)) { homeChance = h; awayChance = a; }
-        }
-
-        // Form: try both structures ESPN uses
-        const l5 = json.lastFiveGames ?? [];
-        const mapForm = (arr: any[]) =>
-          arr.slice(0, 5).map((e: any) => e.gameResult ?? e.result ?? '?');
-        const homeLast5: string[] = mapForm(l5[0]?.events ?? l5[0]?.games ?? []);
-        const awayLast5: string[] = mapForm(l5[1]?.events ?? l5[1]?.games ?? []);
-
-        // H2H: multiple fallbacks for team name
-        const teamName = (t: any) =>
-          t?.team?.abbreviation ||
-          t?.team?.shortDisplayName ||
-          (t?.team?.displayName ? t.team.displayName.substring(0, 3).toUpperCase() : '?');
-
-        const h2h = (json.headToHeadGames ?? []).slice(0, 5).map((g: any) => {
-          const comp = g.competitions?.[0] ?? g;
-          const comps: any[] = comp.competitors ?? g.competitors ?? [];
-          const home = comps.find((c: any) => c.homeAway === 'home') ?? comps[0] ?? {};
-          const away = comps.find((c: any) => c.homeAway === 'away') ?? comps[1] ?? {};
-          const hs = parseInt(home.score ?? '-1'), as_ = parseInt(away.score ?? '-1');
-          return {
-            homeTeam: teamName(home), awayTeam: teamName(away),
-            homeScore: home.score ?? '-', awayScore: away.score ?? '-',
-            date: comp.date ?? g.date ?? '', homeWinner: hs > as_ && hs >= 0,
-            drawResult: hs === as_ && hs >= 0,
-          };
-        });
-
-        // Live match stats
-        const teams: any[] = json.boxscore?.teams ?? [];
-        const buildStats = (t: any) =>
-          Object.keys(STAT_MAP)
-            .map(name => { const s = (t.statistics ?? []).find((x: any) => x.name === name); return s ? { label: STAT_MAP[name], value: s.displayValue } : null; })
-            .filter(Boolean) as Array<{ label: string; value: string }>;
-
-        // Odds from ESPN (provider varies)
-        const oddsArr: any[] = json.odds ?? [];
-        const odds = oddsArr[0];
-        let homeOdds: string | undefined, awayOdds: string | undefined, drawOdds: string | undefined;
-        if (odds) {
-          homeOdds = odds.homeTeamOdds?.moneyLine != null ? (odds.homeTeamOdds.moneyLine > 0 ? `+${odds.homeTeamOdds.moneyLine}` : String(odds.homeTeamOdds.moneyLine)) : odds.homeTeamOdds?.value;
-          awayOdds = odds.awayTeamOdds?.moneyLine != null ? (odds.awayTeamOdds.moneyLine > 0 ? `+${odds.awayTeamOdds.moneyLine}` : String(odds.awayTeamOdds.moneyLine)) : odds.awayTeamOdds?.value;
-          drawOdds = odds.drawOdds?.moneyLine != null ? (odds.drawOdds.moneyLine > 0 ? `+${odds.drawOdds.moneyLine}` : String(odds.drawOdds.moneyLine)) : odds.drawOdds?.value;
-        }
-
-        // Season record from team info
-        const infoTeams: any[] = json.teams ?? [];
-        const fmtRecord = (t: any) => {
-          const r = t?.record?.items?.[0]?.stats;
-          if (!r) return undefined;
-          const w = r.find((s: any) => s.name === 'wins')?.value ?? 0;
-          const d_ = r.find((s: any) => s.name === 'draws' || s.name === 'ties')?.value ?? 0;
-          const l = r.find((s: any) => s.name === 'losses')?.value ?? 0;
-          return w || d_ || l ? `${w}V ${d_}E ${l}D` : undefined;
-        };
-        const homeRecord = fmtRecord(infoTeams[0]);
-        const awayRecord = fmtRecord(infoTeams[1]);
-
-        setData({ homeChance, awayChance, homeLast5, awayLast5, h2h,
-          venue: json.gameInfo?.venue?.fullName,
-          homeStats: buildStats(teams[0] ?? {}), awayStats: buildStats(teams[1] ?? {}),
-          homeOdds, awayOdds, drawOdds, homeRecord, awayRecord });
-      })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
-  }, [eventId]);
-
-  return { data, loading, error };
-}
-
-// ─── Match Modal ──────────────────────────────────────────────────────────────
-
-function FormDot({ result, ..._ }: { result: string; [k: string]: unknown }) {
-  const bg = result === 'W' ? '#22C55E' : result === 'L' ? '#F87171' : result === 'D' ? '#F59E0B' : '#94A3B8';
-  const label = result === 'W' ? 'V' : result === 'L' ? 'D' : result === 'D' ? 'E' : '?';
-  return (
-    <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[11px] font-black text-white" style={{ background: bg }}>
-      {label}
-    </div>
-  );
-}
-
-function MatchModal({ match, isDark, onClose }: { match: Match; isDark: boolean; onClose: () => void }) {
-  const d = isDark;
-  const { data, loading, error } = useMatchSummary(match.id);
-  const drawChance = data?.homeChance != null && data.awayChance != null
-    ? Math.max(0, Math.round(100 - data.homeChance - data.awayChance))
-    : undefined;
-  const noData = data && !data.homeChance && !data.homeLast5.length && !data.h2h.length && !data.homeStats.length;
-
-  return (
-    <AnimatePresence>
-      <motion.div className="fixed inset-0 z-[100] flex flex-col justify-end"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-
-        <motion.div
-          className="relative z-10 rounded-t-3xl overflow-hidden flex flex-col w-full max-w-lg mx-auto"
-          style={{ background: T.bg(d), maxHeight: '88dvh' }}
-          initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 320 }}>
-
-          {/* Handle */}
-          <div className="flex justify-center pt-3 pb-1 shrink-0">
-            <div className="w-10 h-1 rounded-full" style={{ background: T.border(d) }} />
-          </div>
-
-          {/* Header */}
-          <div className="px-5 pt-2 pb-4 shrink-0" style={{ borderBottom: `1px solid ${T.border(d)}` }}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-1.5">
-                <BarChart2 size={14} className="text-amber-400" />
-                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textMuted(d) }}>
-                  Análise do Confronto
-                </p>
-              </div>
-              <button onClick={onClose} className="w-7 h-7 rounded-full flex items-center justify-center"
-                style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
-                <X size={13} style={{ color: T.textMuted(d) }} />
-              </button>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <TeamLogo src={match.homeLogo} abbr={match.home} isDark={isDark} />
-                <p className="font-bold text-xs text-center leading-tight" style={{ color: T.text(d) }}>{match.homeName}</p>
-              </div>
-              <div className="flex flex-col items-center gap-1">
-                <StatusBadge status={match.status} clock={match.clock} closed={match.status === 'STATUS_FINAL'} />
-                <p className="text-[10px] text-center" style={{ color: T.textMuted(d) }}>{fmtDate(match.date)}</p>
-              </div>
-              <div className="flex-1 flex flex-col items-center gap-1.5">
-                <TeamLogo src={match.awayLogo} abbr={match.away} isDark={isDark} />
-                <p className="font-bold text-xs text-center leading-tight" style={{ color: T.text(d) }}>{match.awayName}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Scrollable content */}
-          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-6">
-            {loading && (
-              <div className="flex flex-col items-center justify-center py-12 gap-3">
-                <motion.div className="w-9 h-9 rounded-full border-2 border-amber-400/20 border-t-amber-400"
-                  animate={{ rotate: 360 }} transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }} />
-                <p className="text-xs" style={{ color: T.textMuted(d) }}>Carregando estatísticas...</p>
-              </div>
-            )}
-
-            {error && (
-              <div className="text-center py-10 space-y-2">
-                <WifiOff size={28} className="mx-auto text-slate-400" />
-                <p className="text-sm font-medium" style={{ color: T.textMuted(d) }}>Estatísticas indisponíveis</p>
-              </div>
-            )}
-
-            {noData && (
-              <div className="text-center py-10 space-y-2">
-                <BarChart2 size={28} className="mx-auto text-slate-400" />
-                <p className="text-sm font-medium" style={{ color: T.text(d) }}>Dados ainda não disponíveis</p>
-                <p className="text-xs" style={{ color: T.textMuted(d) }}>As estatísticas aparecem mais próximas da partida</p>
-              </div>
-            )}
-
-            {data && !loading && !noData && (
-              <>
-                {/* Win probability */}
-                {data.homeChance != null && data.awayChance != null && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Probabilidade de vitória
-                    </p>
-                    <div className="flex rounded-xl overflow-hidden h-9">
-                      <div className="flex items-center justify-center text-xs font-black text-white transition-all"
-                        style={{ width: `${data.homeChance}%`, background: '#22C55E', minWidth: 36 }}>
-                        {Math.round(data.homeChance)}%
-                      </div>
-                      {(drawChance ?? 0) > 4 && (
-                        <div className="flex items-center justify-center text-xs font-black transition-all"
-                          style={{ width: `${drawChance}%`, background: '#F59E0B', color: '#0C1120', minWidth: 36 }}>
-                          {drawChance}%
-                        </div>
-                      )}
-                      <div className="flex items-center justify-center text-xs font-black text-white transition-all"
-                        style={{ flex: 1, background: '#6366F1', minWidth: 36 }}>
-                        {Math.round(data.awayChance)}%
-                      </div>
-                    </div>
-                    <div className="flex justify-between mt-1.5 text-[10px]" style={{ color: T.textMuted(d) }}>
-                      <span className="font-medium">{match.homeName}</span>
-                      {(drawChance ?? 0) > 4 && <span>Empate</span>}
-                      <span className="font-medium">{match.awayName}</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Forma recente */}
-                {(data.homeLast5.length > 0 || data.awayLast5.length > 0) && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Forma recente (últimos 5)
-                    </p>
-                    <div className="space-y-3">
-                      {[{ name: match.homeName, form: data.homeLast5 }, { name: match.awayName, form: data.awayLast5 }].map(({ name, form }) => (
-                        <div key={name} className="flex items-center gap-3">
-                          <span className="text-xs font-semibold w-24 truncate shrink-0" style={{ color: T.text(d) }}>{name}</span>
-                          <div className="flex gap-1.5">
-                            {form.map((r, i) => <FormDot key={i} result={String(r)} />)}
-                            {form.length === 0 && <span className="text-xs" style={{ color: T.textMuted(d) }}>—</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-3 mt-2.5">
-                      {[{ c: '#22C55E', l: 'Vitória' }, { c: '#F59E0B', l: 'Empate' }, { c: '#F87171', l: 'Derrota' }].map(({ c, l }) => (
-                        <div key={l} className="flex items-center gap-1">
-                          <div className="w-2.5 h-2.5 rounded-sm" style={{ background: c }} />
-                          <span className="text-[10px]" style={{ color: T.textMuted(d) }}>{l}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Stats ao vivo */}
-                {data.homeStats.length > 0 && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Estatísticas da partida
-                    </p>
-                    <div className="space-y-3">
-                      {data.homeStats.map((stat, i) => {
-                        const away = data.awayStats[i];
-                        const hv = parseFloat(stat.value) || 0;
-                        const av = parseFloat(away?.value ?? '0') || 0;
-                        const total = hv + av || 1;
-                        return (
-                          <div key={stat.label}>
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="font-bold" style={{ color: T.text(d) }}>{stat.value}</span>
-                              <span style={{ color: T.textMuted(d) }}>{stat.label}</span>
-                              <span className="font-bold" style={{ color: T.text(d) }}>{away?.value ?? '-'}</span>
-                            </div>
-                            <div className="flex h-1.5 rounded-full overflow-hidden" style={{ background: T.border(d) }}>
-                              <div className="rounded-full transition-all" style={{ width: `${(hv / total) * 100}%`, background: '#22C55E' }} />
-                              <div className="rounded-full transition-all" style={{ flex: 1, background: '#6366F1' }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Confrontos diretos */}
-                {data.h2h.length > 0 && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Últimos confrontos diretos
-                    </p>
-                    <div className="space-y-2">
-                      {data.h2h.map((g, i) => (
-                        <div key={i} className="flex items-center p-3 rounded-xl gap-2"
-                          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
-                          <span className="text-xs font-bold w-10 text-center shrink-0" style={{ color: T.text(d) }}>{g.homeTeam}</span>
-                          <div className="flex items-center justify-center gap-2 flex-1">
-                            <span className="font-black text-base"
-                              style={{ color: g.homeWinner ? '#22C55E' : g.drawResult ? '#F59E0B' : '#F87171' }}>{g.homeScore}</span>
-                            <span className="text-xs" style={{ color: T.textMuted(d) }}>×</span>
-                            <span className="font-black text-base"
-                              style={{ color: !g.homeWinner && !g.drawResult ? '#22C55E' : g.drawResult ? '#F59E0B' : '#F87171' }}>{g.awayScore}</span>
-                          </div>
-                          <span className="text-xs font-bold w-10 text-center shrink-0" style={{ color: T.text(d) }}>{g.awayTeam}</span>
-                          <span className="text-[10px] shrink-0" style={{ color: T.textMuted(d) }}>
-                            {g.date ? new Date(g.date).getFullYear() : ''}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Odds de apostas */}
-                {(data.homeOdds || data.awayOdds || data.drawOdds) && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Odds (moneyline)
-                    </p>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: match.homeName, value: data.homeOdds, color: '#22C55E' },
-                        { label: 'Empate', value: data.drawOdds, color: '#F59E0B' },
-                        { label: match.awayName, value: data.awayOdds, color: '#6366F1' },
-                      ].map(({ label, value, color }) => value ? (
-                        <div key={label} className="flex flex-col items-center p-2.5 rounded-xl gap-1"
-                          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
-                          <span className="font-black text-base" style={{ color }}>{value}</span>
-                          <span className="text-[10px] text-center leading-tight truncate w-full text-center" style={{ color: T.textMuted(d) }}>{label}</span>
-                        </div>
-                      ) : null)}
-                    </div>
-                  </div>
-                )}
-
-                {/* Recorde da temporada */}
-                {(data.homeRecord || data.awayRecord) && (
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: T.textMuted(d) }}>
-                      Campeonato Brasileiro 2025
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[{ name: match.homeName, rec: data.homeRecord }, { name: match.awayName, rec: data.awayRecord }].map(({ name, rec }) => rec ? (
-                        <div key={name} className="flex flex-col items-center p-3 rounded-xl gap-1"
-                          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
-                          <span className="font-black text-sm" style={{ color: T.text(d) }}>{rec}</span>
-                          <span className="text-[10px] text-center" style={{ color: T.textMuted(d) }}>{name}</span>
-                        </div>
-                      ) : null)}
-                    </div>
-                  </div>
-                )}
-
-                {/* Estádio */}
-                {data.venue && (
-                  <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl"
-                    style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
-                    <MapPin size={13} style={{ color: T.textMuted(d) }} />
-                    <span className="text-xs" style={{ color: T.textMuted(d) }}>{data.venue}</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  );
-}
 
 // ─── Standings ────────────────────────────────────────────────────────────────
 
@@ -1117,24 +831,45 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
 function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: (n: number | string) => void; user: any }) {
   const d = isDark;
   const [loadingBets, setLoadingBets] = useState(false);
+  const [league, setLeague] = useState<League>('bra.1');
 
   const [anchorTs,     setAnchorTs]     = useState(() => todayMidnight());
-  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
-  const { data, loading, error, refetch } = useRodada(anchorTs);
+  const [showPast,     setShowPast]     = useState(false);
+  const isSerieC = league === 'bra.3';
+  const espn   = useRodada(anchorTs, league);
+  const seriec = useSerieCRodada(showPast);
+  const { data, loading, error, refetch } = isSerieC ? seriec : espn;
 
-  const isCurrentRound = anchorTs >= todayMidnight() - 86400000;
-  const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
+  // Para Série C: "rodada atual" = próximos jogos (não passados)
+  const isCurrentRound = isSerieC ? !showPast : anchorTs >= todayMidnight() - 86400000;
+  const [liberatedIds,  setLiberatedIds]  = useState<string[]>([]);
+  type ScoreMap = Record<string, { home: string; away: string }>;
+  const [scores,      setScores]      = useState<ScoreMap>({});
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [submitting,  setSubmitting]  = useState(false);
+  const [isLocked,    setIsLocked]    = useState(false);
+  const [sharedFile,  setSharedFile]  = useState<File | null>(null);
+  const shareRef = React.useRef<HTMLDivElement>(null);
+
+  // Reset ao trocar de liga
+  useEffect(() => {
+    setAnchorTs(todayMidnight());
+    setShowPast(false);
+    setScores({});
+    setIsLocked(false);
+  }, [league]);
 
   useEffect(() => {
     if (data?.roundNumber) onRoundLoad(data.roundNumber);
     fetchLiberated();
-  }, [data?.roundNumber, anchorTs]);
+  }, [data?.roundNumber, anchorTs, league]);
 
   const fetchLiberated = async () => {
     const { data: libData } = await supabase
       .from('jogos_selecionados')
       .select('match_id')
-      .eq('liberado', true);
+      .eq('liberado', true)
+      .eq('league', league);
     if (libData) setLiberatedIds(libData.map(x => x.match_id));
   };
 
@@ -1148,7 +883,8 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
     const { data: bets } = await supabase
       .from('palpites')
       .select('*')
-      .eq('usuario_id', user.id);
+      .eq('usuario_id', user.id)
+      .eq('league', league);
 
     if (bets && bets.length > 0) {
       const betMap: ScoreMap = {};
@@ -1187,13 +923,6 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
     setAnchorTs(Math.min(next.getTime(), todayMidnight()));
   };
 
-  type ScoreMap = Record<string, { home: string; away: string }>;
-  const [scores,    setScores]    = useState<ScoreMap>({});
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [isLocked, setIsLocked] = useState(false);
-  const [sharedFile, setSharedFile] = useState<File | null>(null);
-  const shareRef = React.useRef<HTMLDivElement>(null);
   const matches = (data?.matches ?? []).filter(m => liberatedIds.includes(m.id) || !isCurrentRound);
 
   // Pré-gera a imagem para contornar a exigência de "User Gesture" no mobile
@@ -1304,37 +1033,79 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   return (
     <div className="pb-4 space-y-3">
 
-      {/* ── Navegação de rodadas ── */}
-      <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
-        style={{ background: T.surface(d), borderColor: T.border(d) }}>
-        <button onClick={goBack}
-          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
-          style={{ background: T.elevated(d) }}
-          disabled={loading}>
-          <ChevronLeft size={16} style={{ color: T.text(d) }} />
-        </button>
-
-        <div className="text-center">
-          <p className="font-black text-sm" style={{ color: T.text(d) }}>
-            {loading ? 'Carregando...' : data?.roundNumber !== '?' ? `Rodada ${data?.roundNumber}` : 'Rodada atual'}
-          </p>
-          {!isCurrentRound ? (
-            <button onClick={() => setAnchorTs(todayMidnight())}
-              className="text-[10px] font-bold text-amber-400 underline underline-offset-2">
-              Ir para atual
+      {/* ── Seletor de liga ── */}
+      <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+        {(Object.entries(LEAGUES) as [League, typeof LEAGUES[League]][]).map(([key, lg]) => {
+          const active = league === key;
+          return (
+            <button key={key} onClick={() => setLeague(key)}
+              className="flex-1 py-2.5 rounded-xl text-xs font-black transition-all relative"
+              style={{ color: active ? '#0C1120' : T.textMuted(d) }}>
+              {active && (
+                <motion.div layoutId="leagueTab" className="absolute inset-0 rounded-xl"
+                  style={{ background: lg.color }} transition={{ type: 'spring', damping: 30, stiffness: 350 }} />
+              )}
+              <span className="relative z-10">{lg.label}</span>
             </button>
-          ) : (
-            <p className="text-[10px]" style={{ color: T.textMuted(d) }}>Rodada atual</p>
-          )}
-        </div>
-
-        <button onClick={goForward}
-          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
-          style={{ background: T.elevated(d) }}
-          disabled={loading || isCurrentRound}>
-          <ChevronRight size={16} style={{ color: T.text(d) }} />
-        </button>
+          );
+        })}
       </div>
+
+      {/* ── Navegação de rodadas ── */}
+      {isSerieC ? (
+        /* Série C: alterna próximos / passados */
+        <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
+          style={{ background: T.surface(d), borderColor: T.border(d) }}>
+          <button onClick={() => setShowPast(true)} disabled={loading}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+            style={{ background: T.elevated(d), opacity: showPast ? 1 : 0.3 }}>
+            <ChevronLeft size={16} style={{ color: T.text(d) }} />
+          </button>
+          <div className="text-center">
+            <p className="font-black text-sm" style={{ color: T.text(d) }}>
+              {loading ? 'Carregando...' : data?.roundNumber !== '?' ? `Rodada ${data?.roundNumber}` : 'Série C'}
+            </p>
+            <p className="text-[10px]" style={{ color: showPast ? '#6366F1' : '#22C55E' }}>
+              {showPast ? 'Resultados passados' : 'Próximos jogos'}
+            </p>
+          </div>
+          <button onClick={() => setShowPast(false)} disabled={loading || !showPast}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+            style={{ background: T.elevated(d) }}>
+            <ChevronRight size={16} style={{ color: T.text(d) }} />
+          </button>
+        </div>
+      ) : (
+        /* Série A: navegação por data */
+        <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
+          style={{ background: T.surface(d), borderColor: T.border(d) }}>
+          <button onClick={goBack}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+            style={{ background: T.elevated(d) }}
+            disabled={loading}>
+            <ChevronLeft size={16} style={{ color: T.text(d) }} />
+          </button>
+          <div className="text-center">
+            <p className="font-black text-sm" style={{ color: T.text(d) }}>
+              {loading ? 'Carregando...' : data?.roundNumber !== '?' ? `Rodada ${data?.roundNumber}` : 'Rodada atual'}
+            </p>
+            {!isCurrentRound ? (
+              <button onClick={() => setAnchorTs(todayMidnight())}
+                className="text-[10px] font-bold text-amber-400 underline underline-offset-2">
+                Ir para atual
+              </button>
+            ) : (
+              <p className="text-[10px]" style={{ color: T.textMuted(d) }}>Rodada atual</p>
+            )}
+          </div>
+          <button onClick={goForward}
+            className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+            style={{ background: T.elevated(d) }}
+            disabled={loading || isCurrentRound}>
+            <ChevronRight size={16} style={{ color: T.text(d) }} />
+          </button>
+        </div>
+      )}
 
       {/* Progress (só mostra na rodada atual) */}
       {isCurrentRound && (
@@ -1346,7 +1117,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
           </p>
           <p className="text-xs mt-0.5 flex items-center gap-1.5" style={{ color: T.textMuted(d) }}>
             <Wifi size={11} className="text-emerald-400" />
-            Dados ao vivo • ESPN
+            {isSerieC ? 'TheSportsDB' : 'ESPN'} • <span className="font-bold" style={{ color: LEAGUES[league].color }}>{LEAGUES[league].label}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1392,9 +1163,8 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
 
         return (
           <motion.div key={match.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-            className="rounded-2xl overflow-hidden border transition-transform cursor-pointer active:scale-[0.98]"
-            style={{ background: T.surface(d), borderColor: live ? 'rgba(34,197,94,0.3)' : T.border(d) }}
-            onClick={() => setSelectedMatch(match)}>
+            className="rounded-2xl overflow-hidden border"
+            style={{ background: T.surface(d), borderColor: live ? 'rgba(34,197,94,0.3)' : T.border(d) }}>
 
             <div className="px-4 pt-3 pb-1 flex items-center justify-between">
               <span className="text-[10px] font-medium" style={{ color: T.textMuted(d) }}>{fmtDate(match.date)}</span>
@@ -1429,7 +1199,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                 ) : (
                   // Bet inputs
                   <>
-                    <input type="number" inputMode="numeric" value={sh} placeholder="0"
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sh} placeholder="0"
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'home', e.target.value)}
                       className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
@@ -1439,7 +1209,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                     </div>
-                    <input type="number" inputMode="numeric" value={sa} placeholder="0"
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sa} placeholder="0"
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'away', e.target.value)}
                       className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
@@ -1499,7 +1269,8 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                       usuario_id: user.id,
                       match_id: m.id,
                       gols_home: parseInt(scores[m.id].home),
-                      gols_away: parseInt(scores[m.id].away)
+                      gols_away: parseInt(scores[m.id].away),
+                      league,
                     }));
 
                     const { error: upsertError } = await supabase
@@ -1624,10 +1395,6 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
         </div>
       </div>
 
-      {/* Modal de estatísticas */}
-      {selectedMatch && (
-        <MatchModal match={selectedMatch} isDark={isDark} onClose={() => setSelectedMatch(null)} />
-      )}
     </div>
   );
 }
@@ -1800,6 +1567,142 @@ function Informativo({ isDark }: { isDark: boolean }) {
   );
 }
 
+// ─── Manual Matches Admin ────────────────────────────────────────────────────
+
+function ManualMatchesAdmin({ league, isDark }: { league: League; isDark: boolean }) {
+  const d = isDark;
+  const [matches, setMatches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+  const [editId,  setEditId]  = useState<string | null>(null);
+
+  const blank = { home_name: '', away_name: '', match_date: '', round_number: 1, home_score: '', away_score: '', status: 'STATUS_SCHEDULED' };
+  const [form, setForm] = useState(blank);
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase.from('partidas_manuais').select('*').eq('league', league).order('match_date');
+    setMatches(data ?? []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, [league]);
+
+  const save = async () => {
+    if (!form.home_name || !form.away_name || !form.match_date) return;
+    setSaving(true);
+    const row = {
+      id: editId ?? `${league}_${Date.now()}`,
+      league,
+      home_name: form.home_name,
+      away_name: form.away_name,
+      match_date: new Date(form.match_date).toISOString(),
+      round_number: Number(form.round_number) || 1,
+      home_score: form.home_score !== '' ? Number(form.home_score) : null,
+      away_score: form.away_score !== '' ? Number(form.away_score) : null,
+      status: form.home_score !== '' ? 'STATUS_FINAL' : 'STATUS_SCHEDULED',
+    };
+    await supabase.from('partidas_manuais').upsert(row);
+    setForm(blank); setEditId(null);
+    await load();
+    setSaving(false);
+  };
+
+  const del = async (id: string) => {
+    await supabase.from('partidas_manuais').delete().eq('id', id);
+    load();
+  };
+
+  const edit = (m: any) => {
+    setEditId(m.id);
+    const dt = new Date(m.match_date);
+    const local = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}T${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+    setForm({ home_name: m.home_name, away_name: m.away_name, match_date: local, round_number: m.round_number, home_score: m.home_score ?? '', away_score: m.away_score ?? '', status: m.status });
+  };
+
+  const inp = (cls = '') => `w-full px-3 py-2.5 rounded-xl text-xs font-medium outline-none ${cls}`;
+  const inpStyle = { background: T.inputBg(d), border: `1px solid ${T.inputBdr(d)}`, color: T.text(d) };
+
+  return (
+    <div className="space-y-4">
+      {/* Formulário */}
+      <div className="p-4 rounded-2xl border space-y-3" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textMuted(d) }}>
+          {editId ? 'Editar jogo' : 'Adicionar jogo'}
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <input className={inp()} style={inpStyle} placeholder="Time da Casa" value={form.home_name}
+            onChange={e => setForm(f => ({ ...f, home_name: e.target.value }))} />
+          <input className={inp()} style={inpStyle} placeholder="Time Visitante" value={form.away_name}
+            onChange={e => setForm(f => ({ ...f, away_name: e.target.value }))} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input type="datetime-local" className={inp()} style={inpStyle} value={form.match_date}
+            onChange={e => setForm(f => ({ ...f, match_date: e.target.value }))} />
+          <input className={inp()} style={inpStyle} placeholder="Rodada nº" type="number" value={form.round_number}
+            onChange={e => setForm(f => ({ ...f, round_number: Number(e.target.value) }))} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <input className={inp()} style={inpStyle} placeholder="Placar Casa (opcional)" type="number" value={form.home_score}
+            onChange={e => setForm(f => ({ ...f, home_score: e.target.value }))} />
+          <input className={inp()} style={inpStyle} placeholder="Placar Visitante (opcional)" type="number" value={form.away_score}
+            onChange={e => setForm(f => ({ ...f, away_score: e.target.value }))} />
+        </div>
+        <div className="flex gap-2">
+          <button onClick={save} disabled={saving || !form.home_name || !form.away_name || !form.match_date}
+            className="flex-1 py-2.5 rounded-xl text-xs font-black transition-all active:scale-95 disabled:opacity-50"
+            style={{ background: LEAGUES[league].color, color: '#0C1120' }}>
+            {saving ? 'Salvando...' : editId ? 'Salvar edição' : 'Adicionar jogo'}
+          </button>
+          {editId && (
+            <button onClick={() => { setForm(blank); setEditId(null); }}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold"
+              style={{ background: T.elevated(d), color: T.textMuted(d) }}>
+              Cancelar
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Lista */}
+      {loading ? (
+        <div className="py-8 flex justify-center"><RefreshCw className="animate-spin text-amber-400" /></div>
+      ) : matches.length === 0 ? (
+        <div className="py-8 text-center rounded-2xl border border-dashed" style={{ borderColor: T.border(d) }}>
+          <p className="text-sm" style={{ color: T.textMuted(d) }}>Nenhum jogo cadastrado ainda.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {matches.map(m => (
+            <div key={m.id} className="p-3 rounded-2xl border flex items-center justify-between gap-2"
+              style={{ background: T.surface(d), borderColor: T.border(d) }}>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-black truncate" style={{ color: T.text(d) }}>
+                  {m.home_name} × {m.away_name}
+                  {m.home_score != null && <span className="text-amber-400 ml-2">{m.home_score}–{m.away_score}</span>}
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: T.textMuted(d) }}>
+                  Rd {m.round_number} • {fmtDate(m.match_date)}
+                </p>
+              </div>
+              <div className="flex gap-1.5 shrink-0">
+                <button onClick={() => edit(m)}
+                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold"
+                  style={{ background: T.elevated(d), color: T.textMuted(d) }}>
+                  Editar
+                </button>
+                <button onClick={() => del(m.id)}
+                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-red-500/10 text-red-400">
+                  Del
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Admin Panel ─────────────────────────────────────────────────────────────
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
@@ -1813,16 +1716,23 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   // Controle de jogos selecionados
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
   const [releasing, setReleasing] = useState(false);
+  const [admLeague, setAdmLeague] = useState<League>('bra.1');
 
   // Re-usando lógica de rodada para mostrar os jogos no palpite do usuário
   const [anchorTs, setAnchorTs] = useState(() => todayMidnight());
-  const { data: roundData, refetch: refetchRound } = useRodada(anchorTs);
+  const { data: roundData, refetch: refetchRound } = useRodada(anchorTs, 'bra.1');
+
+  // TheSportsDB para Série C no admin
+  const [admShowPast, setAdmShowPast] = useState(false);
+  const { data: serieCAdmData, loading: serieCAdmLoading } = useSerieCRodada(admShowPast);
+
+  const admMatches = admLeague === 'bra.3' ? serieCAdmData?.matches : roundData?.matches;
 
   const fetchData = async () => {
     setLoading(true);
     const { data: pendUsers } = await supabase.from('usuarios').select('*').eq('status', 'pendente');
     const { data: appUsers } = await supabase.from('usuarios').select('*').eq('status', 'aprovado').neq('cargo', 'Adm');
-    const { data: selMatches } = await supabase.from('jogos_selecionados').select('match_id');
+    const { data: selMatches } = await supabase.from('jogos_selecionados').select('match_id').eq('league', admLeague);
     
     setPending(pendUsers || []);
     setUsers(appUsers || []);
@@ -1830,13 +1740,13 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [admLeague]);
 
   const toggleMatchSelection = async (matchId: string) => {
     if (selectedMatchIds.includes(matchId)) {
-      await supabase.from('jogos_selecionados').delete().eq('match_id', matchId);
+      await supabase.from('jogos_selecionados').delete().eq('match_id', matchId).eq('league', admLeague);
     } else {
-      await supabase.from('jogos_selecionados').insert({ match_id: matchId, liberado: true });
+      await supabase.from('jogos_selecionados').insert({ match_id: matchId, liberado: true, league: admLeague });
     }
     fetchData();
   };
@@ -1947,40 +1857,81 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
           </motion.div>
         ) : (
           <motion.div key="jogos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
-             <div className="p-4 rounded-2xl border bg-amber-400/5 border-amber-400/20 mb-4">
+             <div className="p-4 rounded-2xl border bg-amber-400/5 border-amber-400/20">
                 <p className="text-xs font-bold text-amber-400 uppercase mb-1">Curadoria de Rodada</p>
-                <p className="text-[11px]" style={{ color: T.textMuted(d) }}>Selecione os jogos abaixo para aparecerem para os usuários.</p>
+                <p className="text-[11px]" style={{ color: T.textMuted(d) }}>
+                  {admLeague === 'bra.1' ? 'Selecione os jogos da ESPN para aparecerem.' : 'Selecione os jogos da Série C (TheSportsDB) para aparecerem.'}
+                </p>
              </div>
 
-             <div className="space-y-3">
-                {roundData?.matches.map(m => {
+             {/* Liga selector no admin */}
+             <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+               {(Object.entries(LEAGUES) as [League, typeof LEAGUES[League]][]).map(([key, lg]) => {
+                 const active = admLeague === key;
+                 return (
+                   <button key={key} onClick={() => setAdmLeague(key)}
+                     className="flex-1 py-2 rounded-xl text-xs font-black transition-all relative"
+                     style={{ color: active ? '#0C1120' : T.textMuted(d) }}>
+                     {active && (
+                       <motion.div layoutId="admLeagueTab" className="absolute inset-0 rounded-xl"
+                         style={{ background: lg.color }} transition={{ type: 'spring', damping: 30, stiffness: 350 }} />
+                     )}
+                     <span className="relative z-10">{lg.label}</span>
+                   </button>
+                 );
+               })}
+             </div>
+
+             {/* Navegação passado/próximo para Série C */}
+             {admLeague === 'bra.3' && (
+               <div className="flex items-center justify-between">
+                 <button onClick={() => setAdmShowPast(true)}
+                   className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                   style={{ background: admShowPast ? LEAGUES['bra.3'].color + '20' : T.elevated(d), color: admShowPast ? LEAGUES['bra.3'].color : T.textMuted(d) }}>
+                   <ChevronLeft size={14} /> Passados
+                 </button>
+                 <button onClick={() => setAdmShowPast(false)}
+                   className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all"
+                   style={{ background: !admShowPast ? LEAGUES['bra.3'].color + '20' : T.elevated(d), color: !admShowPast ? LEAGUES['bra.3'].color : T.textMuted(d) }}>
+                   Próximos <ChevronRight size={14} />
+                 </button>
+               </div>
+             )}
+
+             {/* Lista de jogos */}
+             {serieCAdmLoading && admLeague === 'bra.3' ? (
+               <div className="flex justify-center py-8"><RefreshCw size={20} className="animate-spin" style={{ color: T.textMuted(d) }} /></div>
+             ) : (
+               <div className="space-y-3">
+                 {(admMatches ?? []).map(m => {
                    const isSelected = selectedMatchIds.includes(m.id);
+                   const leagueColor = LEAGUES[admLeague].color;
                    return (
-                     <div key={m.id} className="p-3 rounded-2xl border flex items-center justify-between" 
-                       style={{ background: isSelected ? 'rgba(34,197,94,0.05)' : T.surface(d), borderColor: isSelected ? 'rgba(34,197,94,0.3)' : T.border(d) }}>
-                        <div className="flex items-center gap-3 flex-1">
-                           <div className="flex flex-col items-center gap-1">
-                              <img src={m.homeLogo} className="w-5 h-5" alt="" />
-                              <img src={m.awayLogo} className="w-5 h-5" alt="" />
-                           </div>
-                           <div className="min-w-0">
-                              <p className="text-xs font-black truncate" style={{ color: T.text(d) }}>{m.homeName} × {m.awayName}</p>
-                              <p className="text-[10px]" style={{ color: T.textMuted(d) }}>{fmtDate(m.date)}</p>
-                           </div>
-                        </div>
-                        <button onClick={() => toggleMatchSelection(m.id)}
-                          className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                          style={{ 
-                            background: isSelected ? 'rgba(34,197,94,0.1)' : T.elevated(d),
-                            color: isSelected ? '#22C55E' : T.textMuted(d),
-                            border: `1px solid ${isSelected ? 'rgba(34,197,94,0.2)' : T.border(d)}`
-                          }}>
-                          {isSelected ? 'Incluído' : 'Incluir'}
-                        </button>
+                     <div key={m.id} className="p-3 rounded-2xl border flex items-center justify-between"
+                       style={{ background: isSelected ? leagueColor + '0D' : T.surface(d), borderColor: isSelected ? leagueColor + '4D' : T.border(d) }}>
+                       <div className="flex items-center gap-3 flex-1">
+                         <div className="flex flex-col items-center gap-1">
+                           {m.homeLogo ? <img src={m.homeLogo} className="w-5 h-5" alt="" /> : <div className="w-5 h-5 rounded-full" style={{ background: T.elevated(d) }} />}
+                           {m.awayLogo ? <img src={m.awayLogo} className="w-5 h-5" alt="" /> : <div className="w-5 h-5 rounded-full" style={{ background: T.elevated(d) }} />}
+                         </div>
+                         <div className="min-w-0">
+                           <p className="text-xs font-black truncate" style={{ color: T.text(d) }}>{m.homeName} × {m.awayName}</p>
+                           <p className="text-[10px]" style={{ color: T.textMuted(d) }}>{fmtDate(m.date)}</p>
+                         </div>
+                       </div>
+                       <button onClick={() => toggleMatchSelection(m.id)}
+                         className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                         style={{ background: isSelected ? leagueColor + '1A' : T.elevated(d), color: isSelected ? leagueColor : T.textMuted(d), border: `1px solid ${isSelected ? leagueColor + '33' : T.border(d)}` }}>
+                         {isSelected ? 'Incluído' : 'Incluir'}
+                       </button>
                      </div>
                    );
-                })}
-             </div>
+                 })}
+                 {(admMatches ?? []).length === 0 && (
+                   <p className="text-center py-8 text-xs" style={{ color: T.textMuted(d) }}>Nenhum jogo encontrado.</p>
+                 )}
+               </div>
+             )}
           </motion.div>
         )}
       </AnimatePresence>
