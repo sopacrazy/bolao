@@ -1662,7 +1662,7 @@ function ManualMatchesAdmin({ league, isDark }: { league: League; isDark: boolea
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
   const d = isDark;
-  const [admTab, setAdmTab] = useState<'pending' | 'bets' | 'jogos'>('pending');
+  const [admTab, setAdmTab] = useState<'pending' | 'bets' | 'jogos'>('bets');
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
@@ -1718,11 +1718,17 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   const handleDeleteBets = async () => {
     if (!confirmDelete) return;
     setDeleting(true);
-    const { error } = await supabase.from('palpites').delete().eq('usuario_id', confirmDelete.id);
+    const { error, count } = await supabase
+      .from('palpites')
+      .delete({ count: 'exact' })
+      .eq('usuario_id', confirmDelete.id);
     setDeleting(false);
-    if (error) {
-      console.error('[Bolão] Erro ao excluir palpites:', error);
-      alert(`Erro ao excluir: ${error.message}\n\nVerifique as políticas RLS da tabela palpites no Supabase.`);
+    if (error || count === 0) {
+      alert(
+        'Não foi possível excluir os palpites.\n\n' +
+        'Execute no Supabase SQL Editor:\n' +
+        'ALTER TABLE palpites DISABLE ROW LEVEL SECURITY;'
+      );
       setConfirmDelete(null);
       return;
     }
@@ -1738,8 +1744,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       {/* Mini Nav Adm */}
       <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
         {[
-          { key: 'pending', label: 'Pendentes', count: pending.length },
           { key: 'bets', label: 'Palpites', count: users.length },
+          { key: 'pending', label: 'Pendentes', count: pending.length },
           { key: 'jogos', label: 'Rodada', count: selectedMatchIds.length }
         ].map(t => (
           <button key={t.key} onClick={() => { setAdmTab(t.key as any); setSelectedUser(null); }}
