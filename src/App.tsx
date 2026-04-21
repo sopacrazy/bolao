@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Target, Info, Share2, LogIn, AlertCircle,
-  Crown, Medal, Award, Users, TrendingUp, ChevronRight,
+  Crown, Medal, Award, Users, TrendingUp, ChevronRight, ChevronLeft,
   Star, Flame, Shield, Swords, Sun, Moon, LogOut, RefreshCw, Wifi, WifiOff,
 } from 'lucide-react';
 
@@ -73,18 +73,21 @@ async function espnFetchUrl(url: string): Promise<{ matches: Match[]; roundNumbe
   return { matches: parseMatches(json.events ?? []), roundNumber };
 }
 
-function useRodada() {
+// week=null → detecta rodada atual/próxima; week=N → busca rodada específica
+function useRodada(week: number | null) {
   const [data,    setData]    = useState<RodadaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(false);
 
-  const fetch_ = async (force = false) => {
+  const load = async (force = false) => {
     setLoading(true);
     setError(false);
 
+    const cacheKey = week !== null ? `${CACHE_KEY}_w${week}` : CACHE_KEY;
+
     if (!force) {
       try {
-        const raw = localStorage.getItem(CACHE_KEY);
+        const raw = localStorage.getItem(cacheKey);
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
           if (Date.now() - ts < CACHE_TTL) {
@@ -97,26 +100,27 @@ function useRodada() {
     }
 
     try {
-      // Monta intervalo: hoje até +14 dias
-      const today  = new Date();
-      const future = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-      const dateRange = `${ymd(today)}-${ymd(future)}`;
+      let result: { matches: Match[]; roundNumber: number | string };
 
-      // 1ª tentativa: jogos nos próximos 14 dias
-      let result = await espnFetchUrl(`${ESPN_BASE}?dates=${dateRange}`);
+      if (week !== null) {
+        // Rodada específica (navegação histórica)
+        result = await espnFetchUrl(`${ESPN_BASE}?week=${week}&seasontype=2`);
+      } else {
+        // Detecta próxima rodada por intervalo de datas
+        const today  = new Date();
+        const future = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+        result = await espnFetchUrl(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(future)}`);
 
-      // 2ª tentativa: se vazio, busca padrão da ESPN (pode ter jogos ao vivo)
-      if (result.matches.length === 0) {
-        result = await espnFetchUrl(ESPN_BASE);
+        if (result.matches.length === 0)
+          result = await espnFetchUrl(ESPN_BASE);
+
+        if (result.matches.length === 0) {
+          const far = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+          result = await espnFetchUrl(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(far)}`);
+        }
       }
 
-      // 3ª tentativa: ainda vazio, alarga para 30 dias
-      if (result.matches.length === 0) {
-        const far = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-        result = await espnFetchUrl(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(far)}`);
-      }
-
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ payload: result, ts: Date.now() }));
+      localStorage.setItem(cacheKey, JSON.stringify({ payload: result, ts: Date.now() }));
       setData(result);
     } catch {
       setError(true);
@@ -125,9 +129,9 @@ function useRodada() {
     }
   };
 
-  useEffect(() => { fetch_(); }, []);
+  useEffect(() => { load(); }, [week]);
 
-  return { data, loading, error, refetch: () => fetch_(true) };
+  return { data, loading, error, refetch: () => load(true) };
 }
 
 // ─── Static ranking + finance (unchanged) ────────────────────────────────────
@@ -346,11 +350,35 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
 
 function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: number | string) => void }) {
   const d = isDark;
-  const { data, loading, error, refetch } = useRodada();
+
+  // null = rodada atual/próxima; número = rodada histórica
+  const [selectedWeek, setSelectedWeek] = useState<number | null>(null);
+  // guarda o número da rodada "atual" detectada para limitar navegação futura
+  const [baseWeek, setBaseWeek] = useState<number | null>(null);
+
+  const { data, loading, error, refetch } = useRodada(selectedWeek);
 
   useEffect(() => {
-    if (data?.roundNumber) onRoundLoad(data.roundNumber);
+    if (data?.roundNumber && typeof data.roundNumber === 'number') {
+      onRoundLoad(data.roundNumber);
+      // salva a rodada base apenas na carga inicial
+      if (selectedWeek === null) setBaseWeek(data.roundNumber);
+    } else if (data?.roundNumber) {
+      onRoundLoad(data.roundNumber);
+    }
   }, [data?.roundNumber]);
+
+  const goBack = () => {
+    const cur = typeof data?.roundNumber === 'number' ? data.roundNumber : baseWeek;
+    if (cur && cur > 1) setSelectedWeek(cur - 1);
+  };
+  const goForward = () => {
+    const cur = typeof data?.roundNumber === 'number' ? data.roundNumber : baseWeek;
+    if (cur && baseWeek && cur < baseWeek) setSelectedWeek(cur + 1);
+  };
+  const goToBase = () => setSelectedWeek(null);
+
+  const isHistorico = selectedWeek !== null && baseWeek !== null && selectedWeek < baseWeek;
 
   type ScoreMap = Record<string, { home: string; away: string }>;
   const [scores,    setScores]    = useState<ScoreMap>({});
@@ -419,7 +447,41 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
 
   return (
     <div className="pb-4 space-y-3">
-      {/* Progress */}
+
+      {/* ── Navegação de rodadas ── */}
+      <div className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
+        style={{ background: T.surface(d), borderColor: T.border(d) }}>
+        <button onClick={goBack}
+          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+          style={{ background: T.elevated(d) }}
+          disabled={loading || !baseWeek || (typeof data?.roundNumber === 'number' && data.roundNumber <= 1)}>
+          <ChevronLeft size={16} style={{ color: T.text(d) }} />
+        </button>
+
+        <div className="text-center">
+          <p className="font-black text-sm" style={{ color: T.text(d) }}>
+            Rodada {data?.roundNumber ?? '...'}
+          </p>
+          {isHistorico ? (
+            <button onClick={goToBase}
+              className="text-[10px] font-bold text-amber-400 underline underline-offset-2">
+              Ir para atual
+            </button>
+          ) : (
+            <p className="text-[10px]" style={{ color: T.textMuted(d) }}>Rodada atual</p>
+          )}
+        </div>
+
+        <button onClick={goForward}
+          className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
+          style={{ background: T.elevated(d) }}
+          disabled={loading || !isHistorico}>
+          <ChevronRight size={16} style={{ color: T.text(d) }} />
+        </button>
+      </div>
+
+      {/* Progress (só mostra na rodada atual) */}
+      {!isHistorico && (
       <div className="rounded-xl p-4 flex items-center justify-between border"
         style={{ background: d ? 'rgba(251,191,36,0.07)' : 'rgba(251,191,36,0.06)', borderColor: d ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.2)' }}>
         <div>
@@ -451,13 +513,24 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
           )}
         </div>
       </div>
+      )} {/* fim !isHistorico */}
+
+      {/* Banner histórico */}
+      {isHistorico && (
+        <div className="rounded-xl px-4 py-3 flex items-center gap-2 border"
+          style={{ background: 'rgba(99,102,241,0.08)', borderColor: 'rgba(99,102,241,0.2)' }}>
+          <Trophy size={13} className="text-indigo-400 shrink-0" />
+          <p className="text-xs text-indigo-300">Resultados da rodada {data?.roundNumber}</p>
+        </div>
+      )}
 
       {/* Match cards */}
       {matches.map((match, idx) => {
         const sh     = scores[match.id]?.home ?? '';
         const sa     = scores[match.id]?.away ?? '';
-        const closed = match.status === 'STATUS_FINAL';
-        const live   = match.status === 'STATUS_IN_PROGRESS' || match.status === 'STATUS_HALFTIME';
+        // Em modo histórico, trata todos como encerrados visualmente
+        const closed = match.status === 'STATUS_FINAL' || isHistorico;
+        const live   = !isHistorico && (match.status === 'STATUS_IN_PROGRESS' || match.status === 'STATUS_HALFTIME');
 
         return (
           <motion.div key={match.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
