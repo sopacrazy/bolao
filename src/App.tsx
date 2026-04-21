@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Trophy, Target, Info, Share2, LogIn, AlertCircle,
   Crown, Medal, Award, Users, TrendingUp, ChevronRight, ChevronLeft,
-  Star, Flame, Shield, Swords, Sun, Moon, LogOut, RefreshCw, Wifi, WifiOff,
+  Star, Flame, Shield, Swords, Sun, Moon, LogOut, RefreshCw, Wifi, WifiOff, Send,
   X, MapPin, BarChart2, List,
 } from 'lucide-react';
+import { supabase } from './lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -198,7 +199,7 @@ const T = {
 
 // ─── Status badge helper ──────────────────────────────────────────────────────
 
-function StatusBadge({ status, clock }: { status: string; clock: string }) {
+function StatusBadge({ status, clock, closed }: { status: string; clock: string; closed?: boolean }) {
   if (status === 'STATUS_IN_PROGRESS' || status === 'STATUS_HALFTIME') {
     return (
       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full"
@@ -211,11 +212,11 @@ function StatusBadge({ status, clock }: { status: string; clock: string }) {
       </div>
     );
   }
-  if (status === 'STATUS_FINAL') {
+  if (status === 'STATUS_FINAL' || closed) {
     return (
       <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-        style={{ background: 'rgba(148,163,184,0.1)', color: '#64748B', border: '1px solid rgba(148,163,184,0.2)' }}>
-        Encerrado
+        style={{ background: 'rgba(34,197,94,0.1)', color: '#22C55E', border: '1px solid rgba(34,197,94,0.2)' }}>
+        Concluído
       </span>
     );
   }
@@ -422,7 +423,7 @@ function MatchModal({ match, isDark, onClose }: { match: Match; isDark: boolean;
                 <p className="font-bold text-xs text-center leading-tight" style={{ color: T.text(d) }}>{match.homeName}</p>
               </div>
               <div className="flex flex-col items-center gap-1">
-                <StatusBadge status={match.status} clock={match.clock} />
+                <StatusBadge status={match.status} clock={match.clock} closed={match.status === 'STATUS_FINAL'} />
                 <p className="text-[10px] text-center" style={{ color: T.textMuted(d) }}>{fmtDate(match.date)}</p>
               </div>
               <div className="flex-1 flex flex-col items-center gap-1.5">
@@ -878,22 +879,80 @@ function StandingsModal({ isDark, onClose }: { isDark: boolean; onClose: () => v
 // ─── Login ────────────────────────────────────────────────────────────────────
 
 function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: boolean; toggleTheme: () => void }) {
+  const [mode, setMode]       = useState<'login' | 'register'>('login');
   const [user, setUser]       = useState('');
   const [pass, setPass]       = useState('');
+  const [nome, setNome]       = useState('');
+  const [sobrenome, setSobrenome] = useState('');
+  const [apelido, setApelido] = useState('');
+  const [email, setEmail]     = useState('');
   const [error, setError]     = useState(false);
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const d = isDark;
+
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!nome || !sobrenome || !apelido || !email || !pass) {
+      setError(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      const { data, error: regError } = await supabase
+        .from('usuarios')
+        .insert([{ nome, sobrenome, apelido, email, senha: pass, cargo: 'usuario', status: 'pendente' }])
+        .select()
+        .single();
+
+      if (regError) throw regError;
+
+      setSuccess(true);
+      setTimeout(() => {
+        setMode('login');
+        setUser(email);
+        setSuccess(false);
+      }, 2000);
+    } catch (err: any) {
+      setError(true);
+      setTimeout(() => setError(false), 3000);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (mode === 'register') return handleRegister(e);
+    
     setLoading(true);
-    await new Promise(r => setTimeout(r, 600));
-    setLoading(false);
-    if (user.toLowerCase() === 'marcos' && pass === '123') {
+    try {
+      const { data, error } = await supabase
+        .from('usuarios')
+        .select('*')
+        .or(`email.eq.${user},apelido.eq.${user}`)
+        .eq('senha', pass)
+        .single();
+
+      if (error || !data) throw new Error('Invalid credentials');
+
+      if (data.status !== 'aprovado') {
+        setError(true);
+        setErrorMessage(data.status === 'pendente' 
+          ? 'Sua conta está aguardando aprovação.' 
+          : 'Sua conta foi recusada pelo administrador.');
+        setTimeout(() => setError(false), 5000);
+        return;
+      }
+      
+      localStorage.setItem('bolao_user', JSON.stringify(data));
       onLogin();
-    } else {
+    } catch (err) {
       setError(true);
       setTimeout(() => setError(false), 3000);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -918,42 +977,82 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
         className="relative z-10 w-full max-w-sm space-y-10">
 
         <div className="text-center space-y-4">
-          <div className="mx-auto w-20 h-20 rounded-[20px] flex items-center justify-center"
-            style={{ background: 'linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)', boxShadow: '0 0 40px rgba(251,191,36,0.35),0 8px 24px rgba(0,0,0,0.3)' }}>
+          <div className="mx-auto w-20 h-20 rounded-[20px] flex items-center justify-center transition-all duration-300"
+            style={{ 
+              background: 'linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)', 
+              boxShadow: d ? '0 0 40px rgba(251,191,36,0.35), 0 8px 24px rgba(0,0,0,0.3)' : 'none' 
+            }}>
             <Swords size={36} className="text-slate-950" />
           </div>
           <div>
-            <p className="text-amber-400 text-xs font-bold tracking-[0.25em] uppercase mb-1">Bem-vindo ao</p>
+            <p className="text-amber-400 text-xs font-bold tracking-[0.25em] uppercase mb-1">
+              {mode === 'login' ? 'Bem-vindo ao' : 'Crie sua conta'}
+            </p>
             <h1 className="text-3xl font-black leading-tight tracking-tight" style={{ color: T.text(d) }}>
               Bolão dos<br />
-              <span style={{ background: 'linear-gradient(90deg,#FBBF24,#FDE68A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              <span style={d ? { background: 'linear-gradient(90deg,#FBBF24,#FDE68A)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' } : { color: '#F59E0B' }}>
                 Clássicos
               </span>
             </h1>
-            <p className="text-sm mt-2" style={{ color: T.textMuted(d) }}>Palpite no Campeonato Brasileiro</p>
+            <p className="text-sm mt-2" style={{ color: T.textMuted(d) }}>
+              {mode === 'login' ? 'Palpite no Campeonato Brasileiro' : 'Entre na disputa pelo prêmio'}
+            </p>
           </div>
         </div>
 
         <div className="rounded-2xl p-6 space-y-4 border transition-colors duration-300"
           style={{ background: T.surface(d), backdropFilter: 'blur(20px)', borderColor: T.border(d) }}>
           <div className="space-y-3">
-            {[
-              { placeholder: 'Usuário', value: user, onChange: setUser, type: 'text',     Icon: Users  },
-              { placeholder: 'Senha',   value: pass, onChange: setPass, type: 'password', Icon: Shield },
-            ].map(({ placeholder, value, onChange, type, Icon }) => (
-              <div key={placeholder} className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}>
-                  <Icon size={16} />
-                </span>
-                <input type={type} placeholder={placeholder} value={value}
-                  onChange={e => onChange(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
-                  style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d), caretColor: '#FBBF24' }}
-                  onFocus={e => Object.assign(e.target.style, { borderColor: '#FBBF24', background: d ? 'rgba(255,255,255,0.08)' : 'rgba(251,191,36,0.04)' })}
-                  onBlur={e => Object.assign(e.target.style, { borderColor: T.inputBdr(d), background: T.inputBg(d) })}
-                />
-              </div>
-            ))}
+            {mode === 'register' ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><Users size={16} /></span>
+                    <input type="text" placeholder="Nome" value={nome} onChange={e => setNome(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                      style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                  </div>
+                  <div className="relative">
+                    <input type="text" placeholder="Sobrenome" value={sobrenome} onChange={e => setSobrenome(e.target.value)}
+                      className="w-full px-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                      style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                  </div>
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><Award size={16} /></span>
+                  <input type="text" placeholder="Apelido no App" value={apelido} onChange={e => setApelido(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                    style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><LogIn size={16} /></span>
+                  <input type="email" placeholder="E-mail" value={email} onChange={e => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                    style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><Shield size={16} /></span>
+                  <input type="password" placeholder="Senha" value={pass} onChange={e => setPass(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                    style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><Users size={16} /></span>
+                  <input type="text" placeholder="E-mail ou Apelido" value={user} onChange={e => setUser(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                    style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}><Shield size={16} /></span>
+                  <input type="password" placeholder="Senha" value={pass} onChange={e => setPass(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                    style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }} />
+                </div>
+              </>
+            )}
           </div>
 
           <AnimatePresence>
@@ -961,19 +1060,37 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
               <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                 <div className="flex items-center gap-2 text-red-400 bg-red-500/10 border border-red-500/20 p-3 rounded-xl text-xs font-medium">
                   <AlertCircle size={14} />
-                  <span>Credenciais inválidas — tente marcos / 123</span>
+                  <span>{errorMessage || (mode === 'login' ? 'Credenciais inválidas' : 'Erro ao cadastrar. Verifique os dados.')}</span>
+                </div>
+              </motion.div>
+            )}
+            {success && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                <div className="flex items-center gap-2 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl text-xs font-medium">
+                  <Star size={14} fill="currentColor" />
+                  <span>Conta criada! Redirecionando...</span>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          <button onClick={handleSubmit as any} disabled={loading}
+          <button onClick={handleSubmit as any} disabled={loading || success}
             className="w-full py-3.5 rounded-xl font-black text-slate-950 text-sm tracking-wide flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70"
             style={{ background: 'linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)', boxShadow: '0 4px 20px rgba(251,191,36,0.25)' }}>
             {loading
               ? <motion.div className="w-5 h-5 rounded-full border-2 border-slate-950/30 border-t-slate-950"
                   animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: 'linear' }} />
-              : <><span>Entrar</span><LogIn size={16} /></>}
+              : <><span>{mode === 'login' ? 'Entrar' : 'Cadastrar'}</span><LogIn size={16} /></>}
+          </button>
+
+          <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(false); }}
+            className="w-full text-xs font-bold transition-all active:scale-95"
+            style={{ color: T.textMuted(d) }}>
+            {mode === 'login' ? (
+              <>Não tem conta? <span className="text-amber-400">Cadastre-se</span></>
+            ) : (
+              <>Já tem conta? <span className="text-amber-400">Faça login</span></>
+            )}
           </button>
         </div>
 
@@ -996,8 +1113,9 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
 
 // ─── Apostar ──────────────────────────────────────────────────────────────────
 
-function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: number | string) => void }) {
+function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: (n: number | string) => void; user: any }) {
   const d = isDark;
+  const [loadingBets, setLoadingBets] = useState(false);
 
   const [anchorTs,     setAnchorTs]     = useState(() => todayMidnight());
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
@@ -1007,7 +1125,27 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
 
   useEffect(() => {
     if (data?.roundNumber) onRoundLoad(data.roundNumber);
+    if (data?.matches) fetchUserBets();
   }, [data?.roundNumber, anchorTs]);
+
+  const fetchUserBets = async () => {
+    if (!user) return;
+    setLoadingBets(true);
+    const { data: bets } = await supabase
+      .from('palpites')
+      .select('*')
+      .eq('usuario_id', user.id);
+    
+    if (bets && bets.length > 0) {
+      const betMap: ScoreMap = {};
+      bets.forEach(b => {
+        betMap[b.match_id] = { home: String(b.gols_home), away: String(b.gols_away) };
+      });
+      setScores(betMap);
+      setIsLocked(true);
+    }
+    setLoadingBets(false);
+  };
 
   const goBack = () => {
     // Ancora 10 dias antes do primeiro jogo da janela atual
@@ -1033,7 +1171,9 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
 
   type ScoreMap = Record<string, { home: string; away: string }>;
   const [scores,    setScores]    = useState<ScoreMap>({});
-  const [submitted, setSubmitted] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
 
   const matches = data?.matches ?? [];
 
@@ -1171,7 +1311,9 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         <div className="rounded-xl px-4 py-3 flex items-center gap-2 border"
           style={{ background: 'rgba(99,102,241,0.08)', borderColor: 'rgba(99,102,241,0.2)' }}>
           <Trophy size={13} className="text-indigo-400 shrink-0" />
-          <p className="text-xs text-indigo-300">Resultados da rodada {data?.roundNumber}</p>
+          <p className="text-xs text-indigo-300">
+            {data?.roundNumber !== '?' ? `Resultados da rodada ${data?.roundNumber}` : 'Resultados da rodada'}
+          </p>
         </div>
       )}
 
@@ -1185,13 +1327,13 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
 
         return (
           <motion.div key={match.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-            className="rounded-2xl overflow-hidden border cursor-pointer active:scale-[0.98] transition-transform"
+            className="rounded-2xl overflow-hidden border transition-transform"
             style={{ background: T.surface(d), borderColor: live ? 'rgba(34,197,94,0.3)' : T.border(d) }}
-            onClick={() => setSelectedMatch(match)}>
+            /* Removido analise por enquanto */>
 
             <div className="px-4 pt-3 pb-1 flex items-center justify-between">
               <span className="text-[10px] font-medium" style={{ color: T.textMuted(d) }}>{fmtDate(match.date)}</span>
-              <StatusBadge status={match.status} clock={match.clock} />
+              <StatusBadge status={match.status} clock={match.clock} closed={closed} />
             </div>
 
             <div className="flex items-center px-4 pb-4 pt-2 gap-2">
@@ -1223,8 +1365,9 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
                   // Bet inputs
                   <>
                     <input type="number" inputMode="numeric" value={sh} placeholder="0"
+                      disabled={isLocked}
                       onChange={e => setScore(match.id, 'home', e.target.value)}
-                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600"
+                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
                       style={{ background: sh ? 'rgba(251,191,36,0.12)' : T.inputBg(d), border: `1.5px solid ${sh ? 'rgba(251,191,36,0.4)' : T.inputBdr(d)}`, color: T.text(d) }}
                     />
                     <div className="flex flex-col items-center gap-0.5">
@@ -1232,8 +1375,9 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                     </div>
                     <input type="number" inputMode="numeric" value={sa} placeholder="0"
+                      disabled={isLocked}
                       onChange={e => setScore(match.id, 'away', e.target.value)}
-                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600"
+                      className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
                       style={{ background: sa ? 'rgba(251,191,36,0.12)' : T.inputBg(d), border: `1.5px solid ${sa ? 'rgba(251,191,36,0.4)' : T.inputBdr(d)}`, color: T.text(d) }}
                     />
                   </>
@@ -1261,36 +1405,102 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
       })}
 
       {/* Submit — só na rodada atual */}
-      {isCurrentRound && openMatches.length > 0 && (
+      {isCurrentRound && openMatches.length > 0 ? (
         <div className="pt-2">
           <AnimatePresence mode="wait">
-            {submitted ? (
-              <motion.div key="ok" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-                className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-emerald-400 text-sm border"
-                style={{ background: 'rgba(34,197,94,0.1)', borderColor: 'rgba(34,197,94,0.2)' }}>
-                <Star size={16} fill="currentColor" /> Palpites enviados com sucesso!
+            {isLocked ? (
+              <motion.div key="locked" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-emerald-400 text-sm border shadow-lg"
+                style={{ background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.3)' }}>
+                <Shield size={16} fill="currentColor" /> Palpites Confirmados
               </motion.div>
             ) : (
-              <button key="btn" onClick={() => canSubmit && setSubmitted(true)}
-                className="w-full py-4 rounded-xl font-black text-sm tracking-wide transition-all active:scale-95"
+              <button key="btn" 
+                onClick={async () => {
+                  if (!canSubmit || submitting) return;
+                  setSubmitting(true);
+                  try {
+                    const betsToInsert = openMatches.map(m => ({
+                      usuario_id: user.id,
+                      match_id: m.id,
+                      gols_home: parseInt(scores[m.id].home),
+                      gols_away: parseInt(scores[m.id].away)
+                    }));
+
+                    const { error: upsertError } = await supabase
+                      .from('palpites')
+                      .upsert(betsToInsert, { onConflict: 'usuario_id,match_id' });
+
+                    if (upsertError) throw upsertError;
+                    setIsLocked(true);
+                    setShowSuccess(true);
+                  } catch (err) {
+                    alert('Erro ao salvar palpites. Tente novamente.');
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                className="w-full py-4 rounded-xl font-black text-sm tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2"
                 style={{
                   background: canSubmit ? 'linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)' : T.elevated(d),
                   color: canSubmit ? '#0C1120' : T.textMuted(d),
                   border: canSubmit ? 'none' : `1px solid ${T.border(d)}`,
                   boxShadow: canSubmit ? '0 4px 24px rgba(251,191,36,0.25)' : 'none',
-                  cursor: canSubmit ? 'pointer' : 'not-allowed',
+                  cursor: canSubmit && !submitting ? 'pointer' : 'not-allowed',
+                  opacity: submitting ? 0.7 : 1
                 }}>
-                {canSubmit ? 'Enviar Palpites' : `Faltam ${openMatches.length - filledCount} palpites`}
+                {submitting ? (
+                   <motion.div className="w-5 h-5 rounded-full border-2 border-slate-950/30 border-t-slate-950"
+                   animate={{ rotate: 360 }} transition={{ duration: 0.7, repeat: Infinity, ease: 'linear' }} />
+                ) : (
+                  canSubmit ? <><Send size={16} /> Enviar Palpites</> : `Faltam ${openMatches.length - filledCount} palpites`
+                )}
               </button>
             )}
           </AnimatePresence>
         </div>
-      )}
+      ) : (isCurrentRound && openMatches.length === 0) ? (
+         <div className="py-8 text-center rounded-2xl border border-dashed" style={{ borderColor: T.border(d) }}>
+           <p className="text-sm font-bold" style={{ color: T.text(d) }}>Nenhum jogo disponível para apostar no momento.</p>
+           <p className="text-xs mt-1" style={{ color: T.textMuted(d) }}>Aguarde a próxima rodada!</p>
+         </div>
+      ) : null}
 
       {/* Hint */}
       <p className="text-center text-[10px] pb-2" style={{ color: T.textMuted(d) }}>
         Toque em um jogo para ver estatísticas
       </p>
+
+      {/* Success Overlay */}
+      <AnimatePresence>
+        {showSuccess && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+            className="fixed inset-0 z-[100] flex items-center justify-center px-6 bg-slate-950/80 backdrop-blur-sm"
+            onClick={() => setShowSuccess(false)}>
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+              className="w-full max-w-sm rounded-[32px] p-8 text-center border overflow-hidden relative"
+              style={{ background: T.surface(d), borderColor: T.border(d) }}
+              onClick={e => e.stopPropagation()}>
+              
+              <div className="absolute top-0 left-0 w-full h-1 bg-emerald-500" />
+              
+              <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center mx-auto mb-6">
+                <Star size={40} className="text-emerald-400" fill="currentColor" />
+              </div>
+
+              <h2 className="text-2xl font-black mb-2" style={{ color: T.text(d) }}>Palpites Enviados!</h2>
+              <p className="text-sm leading-relaxed mb-8" style={{ color: T.textMuted(d) }}>
+                Seus palpites foram registrados e bloqueados para sua segurança. Boa sorte na rodada! 🍀
+              </p>
+
+              <button onClick={() => setShowSuccess(false)}
+                className="w-full py-4 rounded-2xl font-black text-sm bg-emerald-500 text-slate-950 transition-all active:scale-95 shadow-lg shadow-emerald-500/20">
+                Entendido
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Modal de estatísticas */}
       {selectedMatch && (
@@ -1468,33 +1678,235 @@ function Informativo({ isDark }: { isDark: boolean }) {
   );
 }
 
+// ─── Admin Panel ─────────────────────────────────────────────────────────────
+
+function AdminPanel({ isDark }: { isDark: boolean }) {
+  const d = isDark;
+  const [admTab, setAdmTab] = useState<'pending' | 'bets'>('pending');
+  const [pending, setPending] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
+  const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Re-usando lógica de rodada para mostrar os jogos no palpite do usuário
+  const [anchorTs] = useState(() => todayMidnight());
+  const { data: roundData } = useRodada(anchorTs);
+
+  const fetchData = async () => {
+    setLoading(true);
+    const { data: pendUsers } = await supabase.from('usuarios').select('*').eq('status', 'pendente');
+    const { data: appUsers } = await supabase.from('usuarios').select('*').eq('status', 'aprovado').neq('cargo', 'Adm');
+    setPending(pendUsers || []);
+    setUsers(appUsers || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  const handleAction = async (id: string, newStatus: 'aprovado' | 'recusado') => {
+    await supabase.from('usuarios').update({ status: newStatus }).eq('id', id);
+    fetchData();
+  };
+
+  if (loading) return <div className="p-10 flex justify-center"><RefreshCw className="animate-spin text-amber-400" /></div>;
+
+  return (
+    <div className="pb-24 space-y-5">
+      {/* Mini Nav Adm */}
+      <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+        {[
+          { key: 'pending', label: 'Pendentes', count: pending.length },
+          { key: 'bets', label: 'Ver Palpites', count: users.length }
+        ].map(t => (
+          <button key={t.key} onClick={() => { setAdmTab(t.key as any); setSelectedUser(null); }}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all relative"
+            style={{ color: admTab === t.key ? T.text(d) : T.textMuted(d) }}>
+            {admTab === t.key && (
+              <motion.div layoutId="admTab" className="absolute inset-0 rounded-xl" style={{ background: T.elevated(d) }} />
+            )}
+            <span className="relative z-10 flex items-center justify-center gap-2">
+              {t.label}
+              {t.count > 0 && <span className="w-5 h-5 rounded-full bg-amber-400/10 text-amber-400 flex items-center justify-center text-[10px]">{t.count}</span>}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <AnimatePresence mode="wait">
+        {admTab === 'pending' ? (
+          <motion.div key="pending" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-3">
+             {pending.length === 0 ? (
+                <div className="py-12 text-center rounded-2xl border border-dashed" style={{ borderColor: T.border(d) }}>
+                  <p className="text-sm" style={{ color: T.textMuted(d) }}>Nenhuma solicitação pendente.</p>
+                </div>
+              ) : (
+                pending.map(u => (
+                  <motion.div key={u.id} className="rounded-2xl p-4 border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs" style={{ background: T.elevated(d), color: T.text(d) }}>
+                          {u.nome[0]}{u.sobrenome[0]}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm" style={{ color: T.text(d) }}>{u.nome} {u.sobrenome}</p>
+                          <p className="text-xs" style={{ color: T.textMuted(d) }}>@{u.apelido}</p>
+                        </div>
+                      </div>
+                      <div className="p-2 rounded-xl bg-amber-400/10"><Users size={14} className="text-amber-400" /></div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleAction(u.id, 'aprovado')} className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-black active:scale-95">Aprovar</button>
+                      <button onClick={() => handleAction(u.id, 'recusado')} className="flex-1 py-2.5 rounded-xl bg-red-500/10 text-red-500 text-xs font-black border border-red-500/20 active:scale-95">Recusar</button>
+                    </div>
+                  </motion.div>
+                ))
+              )}
+          </motion.div>
+        ) : (
+          <motion.div key="bets" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+            {selectedUser ? (
+              <div className="space-y-4">
+                <button onClick={() => setSelectedUser(null)} className="flex items-center gap-2 text-xs font-bold" style={{ color: T.textMuted(d) }}>
+                  <ChevronLeft size={14} /> Voltar para lista
+                </button>
+                
+                <div className="p-4 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm" style={{ background: T.elevated(d), color: T.text(d) }}>
+                      {selectedUser.nome[0]}{selectedUser.sobrenome[0]}
+                    </div>
+                    <div>
+                      <p className="font-black text-base" style={{ color: T.text(d) }}>{selectedUser.nome} {selectedUser.sobrenome}</p>
+                      <p className="text-xs" style={{ color: T.textMuted(d) }}>Palpites de @{selectedUser.apelido}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <UserBetsList userId={selectedUser.id} roundMatches={roundData?.matches || []} isDark={d} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {users.map(u => (
+                  <button key={u.id} onClick={() => setSelectedUser(u)}
+                    className="flex items-center justify-between p-4 rounded-2xl border transition-all active:scale-[0.98]" 
+                    style={{ background: T.surface(d), borderColor: T.border(d) }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs" style={{ background: T.elevated(d), color: T.text(d) }}>
+                        {u.nome[0]}{u.sobrenome[0]}
+                      </div>
+                      <div className="text-left">
+                        <p className="font-bold text-sm" style={{ color: T.text(d) }}>{u.nome} {u.sobrenome}</p>
+                        <p className="text-xs" style={{ color: T.textMuted(d) }}>@{u.apelido}</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} style={{ color: T.textMuted(d) }} />
+                  </button>
+                ))}
+                {users.length === 0 && <p className="text-center py-10 text-sm" style={{ color: T.textMuted(d) }}>Nenhum usuário aprovado ainda.</p>}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function UserBetsList({ userId, roundMatches, isDark }: { userId: string, roundMatches: Match[], isDark: boolean }) {
+  const d = isDark;
+  const [bets, setBets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchBets = async () => {
+      const { data } = await supabase.from('palpites').select('*').eq('usuario_id', userId);
+      setBets(data || []);
+      setLoading(false);
+    };
+    fetchBets();
+  }, [userId]);
+
+  if (loading) return <div className="py-10 flex justify-center"><RefreshCw className="animate-spin text-amber-400" /></div>;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest px-1" style={{ color: T.textMuted(d) }}>Palpites Registrados</p>
+      {roundMatches.map(m => {
+        const bet = bets.find(b => b.match_id === m.id);
+        return (
+          <div key={m.id} className="p-4 rounded-2xl border flex items-center justify-between gap-4" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+               <img src={m.homeLogo} className="w-6 h-6 object-contain" alt="" />
+               <span className="text-xs font-bold truncate" style={{ color: T.text(d) }}>{m.home}</span>
+            </div>
+            
+            <div className="flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-xl" style={{ background: T.elevated(d) }}>
+              <span className="font-black text-sm" style={{ color: bet ? T.text(d) : T.textMuted(d) }}>{bet ? bet.gols_home : '-'}</span>
+              <span className="text-[10px] opacity-30">×</span>
+              <span className="font-black text-sm" style={{ color: bet ? T.text(d) : T.textMuted(d) }}>{bet ? bet.gols_away : '-'}</span>
+            </div>
+
+            <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+               <span className="text-xs font-bold truncate text-right" style={{ color: T.text(d) }}>{m.away}</span>
+               <img src={m.awayLogo} className="w-6 h-6 object-contain" alt="" />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 const tabs = [
   { key: 'apostar', label: 'Palpites', Icon: Target },
   { key: 'ranking', label: 'Ranking',  Icon: Trophy },
   { key: 'info',    label: 'Resumo',   Icon: Info   },
+  { key: 'admin',   label: 'Painel',   Icon: Shield, adminOnly: true },
 ] as const;
 
-type Tab = 'apostar' | 'ranking' | 'info';
+type Tab = 'apostar' | 'ranking' | 'info' | 'admin';
 
 const headerContent: Record<Tab, { title: string; sub: string }> = {
   apostar: { title: '',            sub: 'Faça seus palpites'    },
   ranking: { title: 'Ranking Geral', sub: 'Classificação ao vivo' },
   info:    { title: 'Resumo',        sub: 'Financeiro do bolão'   },
+  admin:   { title: 'Administrador', sub: 'Gerenciar rodadas'    },
 };
 
 export default function App() {
   const [tab,            setTab]            = useState<Tab>('apostar');
   const [auth,           setAuth]           = useState(false);
+  const [user,           setUser]           = useState<any>(null);
   const [isDark,         setIsDark]         = useState(false);
   const [roundNumber,    setRoundNumber]    = useState<number | string>('...');
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('bolao_user');
+    if (savedUser) {
+      setUser(JSON.parse(savedUser));
+      setAuth(true);
+    }
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem('bolao_user');
+    setAuth(false);
+    setUser(null);
+  };
   const [showStandings,  setShowStandings]  = useState(false);
   const d = isDark;
 
-  if (!auth) return <Login onLogin={() => setAuth(true)} isDark={isDark} toggleTheme={() => setIsDark(v => !v)} />;
+  if (!auth) return <Login onLogin={() => {
+    const savedUser = localStorage.getItem('bolao_user');
+    if (savedUser) setUser(JSON.parse(savedUser));
+    setAuth(true);
+  }} isDark={isDark} toggleTheme={() => setIsDark(!isDark)} />;
 
-  const title = tab === 'apostar' ? `Rodada ${roundNumber}` : headerContent[tab].title;
+  const title = tab === 'apostar' ? (roundNumber === '?' || roundNumber === '...' ? 'Rodada' : `Rodada ${roundNumber}`) : headerContent[tab].title;
   const sub   = headerContent[tab].sub;
 
   return (
@@ -1508,7 +1920,7 @@ export default function App() {
             <AnimatePresence mode="wait">
               <motion.div key={tab + roundNumber} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }} transition={{ duration: 0.18 }}>
                 <p className="text-xs font-bold uppercase tracking-widest mb-0.5" style={{ color: T.textMuted(d) }}>
-                  Bolão dos Clássicos
+                  {user?.apelido ? `Ola, ${user.apelido}` : 'Bolão dos Clássicos'}
                 </p>
                 <h1 className="font-black text-2xl tracking-tight" style={{ color: T.text(d) }}>{title}</h1>
                 <p className="text-xs mt-0.5" style={{ color: T.textMuted(d) }}>{sub}</p>
@@ -1523,12 +1935,12 @@ export default function App() {
               title="Classificação Brasileirão">
               <List size={15} style={{ color: T.textMuted(d) }} />
             </button>
-            <button onClick={() => setIsDark(v => !v)}
+            <button onClick={() => setIsDark(!isDark)}
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
               style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
               {d ? <Sun size={15} className="text-amber-400" /> : <Moon size={15} className="text-slate-500" />}
             </button>
-            <button onClick={() => setAuth(false)}
+            <button onClick={handleLogout}
               className="w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-90"
               style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}>
               <LogOut size={15} style={{ color: T.textMuted(d) }} />
@@ -1543,7 +1955,7 @@ export default function App() {
           <AnimatePresence mode="wait">
             {tab === 'apostar' && (
               <motion.div key="apostar" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.2 }}>
-                <Apostar isDark={isDark} onRoundLoad={setRoundNumber} />
+                <Apostar user={user} isDark={isDark} onRoundLoad={setRoundNumber} />
               </motion.div>
             )}
             {tab === 'ranking' && (
@@ -1556,6 +1968,11 @@ export default function App() {
                 <Informativo isDark={isDark} />
               </motion.div>
             )}
+            {tab === 'admin' && (
+              <motion.div key="admin" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.2 }}>
+                <AdminPanel isDark={isDark} />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
       </main>
@@ -1564,10 +1981,11 @@ export default function App() {
       <nav className="shrink-0 z-50 transition-colors duration-300"
         style={{ background: T.navBg(d), backdropFilter: 'blur(20px)', borderTop: `1px solid ${T.border(d)}` }}>
         <div className="flex justify-around items-center pt-2 pb-6 px-4 max-w-lg mx-auto">
-          {tabs.map(({ key, label, Icon }) => {
+          {tabs.map(({ key, label, Icon, adminOnly }: any) => {
+            if (adminOnly && user?.cargo?.toLowerCase() !== 'adm') return null;
             const active = tab === key;
             return (
-              <button key={key} onClick={() => setTab(key)}
+              <button key={key} onClick={() => setTab(key as Tab)}
                 className="flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition-all relative"
                 style={{ minWidth: 72 }}>
                 {active && (
