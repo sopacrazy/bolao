@@ -1123,11 +1123,24 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   const { data, loading, error, refetch } = useRodada(anchorTs);
 
   const isCurrentRound = anchorTs >= todayMidnight() - 86400000;
+  const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (data?.roundNumber) onRoundLoad(data.roundNumber);
-    if (data?.matches) fetchUserBets();
+    fetchLiberated();
   }, [data?.roundNumber, anchorTs]);
+
+  const fetchLiberated = async () => {
+    const { data: libData } = await supabase
+      .from('jogos_selecionados')
+      .select('match_id')
+      .eq('liberado', true);
+    if (libData) setLiberatedIds(libData.map(x => x.match_id));
+  };
+
+  useEffect(() => {
+    if (data?.matches) fetchUserBets();
+  }, [data?.matches, anchorTs]);
 
   const fetchUserBets = async () => {
     if (!user) return;
@@ -1136,7 +1149,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
       .from('palpites')
       .select('*')
       .eq('usuario_id', user.id);
-    
+
     if (bets && bets.length > 0) {
       const betMap: ScoreMap = {};
       bets.forEach(b => {
@@ -1144,6 +1157,10 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
       });
       setScores(betMap);
       setIsLocked(true);
+    } else {
+      // Palpites apagados do banco — libera o formulário novamente
+      setScores({});
+      setIsLocked(false);
     }
     setLoadingBets(false);
   };
@@ -1177,7 +1194,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
   const [isLocked, setIsLocked] = useState(false);
   const [sharedFile, setSharedFile] = useState<File | null>(null);
   const shareRef = React.useRef<HTMLDivElement>(null);
-  const matches = data?.matches ?? [];
+  const matches = (data?.matches ?? []).filter(m => liberatedIds.includes(m.id) || !isCurrentRound);
 
   // Pré-gera a imagem para contornar a exigência de "User Gesture" no mobile
   useEffect(() => {
@@ -1224,7 +1241,6 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
       console.error('[Bolão] Erro ao compartilhar:', err);
     }
   };
-
 
   const setScore = (id: string, side: 'home' | 'away', val: string) =>
     setScores(s => ({ ...s, [id]: { ...(s[id] ?? { home: '', away: '' }), [side]: val.replace(/\D/g, '').slice(0, 2) } }));
@@ -1376,9 +1392,9 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
 
         return (
           <motion.div key={match.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-            className="rounded-2xl overflow-hidden border transition-transform"
+            className="rounded-2xl overflow-hidden border transition-transform cursor-pointer active:scale-[0.98]"
             style={{ background: T.surface(d), borderColor: live ? 'rgba(34,197,94,0.3)' : T.border(d) }}
-            /* Removido analise por enquanto */>
+            onClick={() => setSelectedMatch(match)}>
 
             <div className="px-4 pt-3 pb-1 flex items-center justify-between">
               <span className="text-[10px] font-medium" style={{ color: T.textMuted(d) }}>{fmtDate(match.date)}</span>
@@ -1788,26 +1804,42 @@ function Informativo({ isDark }: { isDark: boolean }) {
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
   const d = isDark;
-  const [admTab, setAdmTab] = useState<'pending' | 'bets'>('pending');
+  const [admTab, setAdmTab] = useState<'pending' | 'bets' | 'jogos'>('pending');
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Controle de jogos selecionados
+  const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
+  const [releasing, setReleasing] = useState(false);
+
   // Re-usando lógica de rodada para mostrar os jogos no palpite do usuário
-  const [anchorTs] = useState(() => todayMidnight());
-  const { data: roundData } = useRodada(anchorTs);
+  const [anchorTs, setAnchorTs] = useState(() => todayMidnight());
+  const { data: roundData, refetch: refetchRound } = useRodada(anchorTs);
 
   const fetchData = async () => {
     setLoading(true);
     const { data: pendUsers } = await supabase.from('usuarios').select('*').eq('status', 'pendente');
     const { data: appUsers } = await supabase.from('usuarios').select('*').eq('status', 'aprovado').neq('cargo', 'Adm');
+    const { data: selMatches } = await supabase.from('jogos_selecionados').select('match_id');
+    
     setPending(pendUsers || []);
     setUsers(appUsers || []);
+    setSelectedMatchIds((selMatches || []).map(m => m.match_id));
     setLoading(false);
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const toggleMatchSelection = async (matchId: string) => {
+    if (selectedMatchIds.includes(matchId)) {
+      await supabase.from('jogos_selecionados').delete().eq('match_id', matchId);
+    } else {
+      await supabase.from('jogos_selecionados').insert({ match_id: matchId, liberado: true });
+    }
+    fetchData();
+  };
 
   const handleAction = async (id: string, newStatus: 'aprovado' | 'recusado') => {
     await supabase.from('usuarios').update({ status: newStatus }).eq('id', id);
@@ -1822,7 +1854,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       <div className="flex p-1 rounded-2xl border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
         {[
           { key: 'pending', label: 'Pendentes', count: pending.length },
-          { key: 'bets', label: 'Ver Palpites', count: users.length }
+          { key: 'bets', label: 'Palpites', count: users.length },
+          { key: 'jogos', label: 'Rodada', count: selectedMatchIds.length }
         ].map(t => (
           <button key={t.key} onClick={() => { setAdmTab(t.key as any); setSelectedUser(null); }}
             className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all relative"
@@ -1868,7 +1901,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 ))
               )}
           </motion.div>
-        ) : (
+        ) : admTab === 'bets' ? (
           <motion.div key="bets" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
             {selectedUser ? (
               <div className="space-y-4">
@@ -1911,6 +1944,43 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 {users.length === 0 && <p className="text-center py-10 text-sm" style={{ color: T.textMuted(d) }}>Nenhum usuário aprovado ainda.</p>}
               </div>
             )}
+          </motion.div>
+        ) : (
+          <motion.div key="jogos" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+             <div className="p-4 rounded-2xl border bg-amber-400/5 border-amber-400/20 mb-4">
+                <p className="text-xs font-bold text-amber-400 uppercase mb-1">Curadoria de Rodada</p>
+                <p className="text-[11px]" style={{ color: T.textMuted(d) }}>Selecione os jogos abaixo para aparecerem para os usuários.</p>
+             </div>
+
+             <div className="space-y-3">
+                {roundData?.matches.map(m => {
+                   const isSelected = selectedMatchIds.includes(m.id);
+                   return (
+                     <div key={m.id} className="p-3 rounded-2xl border flex items-center justify-between" 
+                       style={{ background: isSelected ? 'rgba(34,197,94,0.05)' : T.surface(d), borderColor: isSelected ? 'rgba(34,197,94,0.3)' : T.border(d) }}>
+                        <div className="flex items-center gap-3 flex-1">
+                           <div className="flex flex-col items-center gap-1">
+                              <img src={m.homeLogo} className="w-5 h-5" alt="" />
+                              <img src={m.awayLogo} className="w-5 h-5" alt="" />
+                           </div>
+                           <div className="min-w-0">
+                              <p className="text-xs font-black truncate" style={{ color: T.text(d) }}>{m.homeName} × {m.awayName}</p>
+                              <p className="text-[10px]" style={{ color: T.textMuted(d) }}>{fmtDate(m.date)}</p>
+                           </div>
+                        </div>
+                        <button onClick={() => toggleMatchSelection(m.id)}
+                          className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                          style={{ 
+                            background: isSelected ? 'rgba(34,197,94,0.1)' : T.elevated(d),
+                            color: isSelected ? '#22C55E' : T.textMuted(d),
+                            border: `1px solid ${isSelected ? 'rgba(34,197,94,0.2)' : T.border(d)}`
+                          }}>
+                          {isSelected ? 'Incluído' : 'Incluir'}
+                        </button>
+                     </div>
+                   );
+                })}
+             </div>
           </motion.div>
         )}
       </AnimatePresence>
