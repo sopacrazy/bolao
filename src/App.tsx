@@ -62,39 +62,37 @@ function parseMatches(events: any[]): Match[] {
   });
 }
 
-async function espnFetchWeek(week: number): Promise<RodadaData> {
-  const res = await fetch(`${ESPN_BASE}?week=${week}&seasontype=2`);
-  if (!res.ok) throw new Error('ESPN error');
-  const json = await res.json();
-  return { matches: parseMatches(json.events ?? []), roundNumber: week };
-}
-
-// Descobre a rodada "viva" (atual ou próxima) via endpoint padrão da ESPN
-async function detectLiveWeek(): Promise<number> {
-  const today  = new Date();
-  const future = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
-
-  // Tenta com range de datas primeiro (próximas 2 semanas)
-  const r1 = await fetch(`${ESPN_BASE}?dates=${ymd(today)}-${ymd(future)}`);
-  const j1 = await r1.json();
-  const w1: number | undefined = j1.week?.number;
-  if (w1) return w1;
-
-  // Fallback: endpoint padrão
-  const r2 = await fetch(ESPN_BASE);
-  const j2 = await r2.json();
-  const w2: number | undefined = j2.week?.number;
-  if (w2) {
-    // Se todos encerrados, avança uma rodada
-    const events = j2.events ?? [];
-    const allDone = events.length > 0 && events.every((e: any) => e.status?.type?.name === 'STATUS_FINAL');
-    return allDone ? w2 + 1 : w2;
+// Tenta extrair número da rodada das notas do evento (ex: "Matchday 5")
+function extractRound(events: any[]): number | string {
+  for (const ev of events) {
+    const notes: any[] = ev.competitions?.[0]?.notes ?? [];
+    for (const n of notes) {
+      const m = String(n.headline ?? n.value ?? '').match(/\d+/);
+      if (m) return parseInt(m[0]);
+    }
+    const rn = ev.competitions?.[0]?.series?.roundNumber;
+    if (rn) return rn;
   }
-
-  return 1;
+  return '?';
 }
 
-function useRodada(week: number) {
+async function espnDateRange(start: Date, end: Date): Promise<RodadaData> {
+  const res  = await fetch(`${ESPN_BASE}?dates=${ymd(start)}-${ymd(end)}`);
+  if (!res.ok) throw new Error();
+  const json = await res.json();
+  const roundNumber =
+    json.week?.number ??
+    json.leagues?.[0]?.season?.type?.week?.number ??
+    extractRound(json.events ?? []);
+  return { matches: parseMatches(json.events ?? []), roundNumber };
+}
+
+function todayMidnight() {
+  const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
+}
+
+// anchorTs: timestamp do "centro" da janela de busca
+function useRodada(anchorTs: number) {
   const [data,    setData]    = useState<RodadaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState(false);
@@ -102,7 +100,8 @@ function useRodada(week: number) {
   const load = async (force = false) => {
     setLoading(true);
     setError(false);
-    const cacheKey = `${CACHE_KEY}_w${week}`;
+    const cacheKey = `${CACHE_KEY}_${anchorTs}`;
+
     if (!force) {
       try {
         const raw = localStorage.getItem(cacheKey);
@@ -112,15 +111,49 @@ function useRodada(week: number) {
         }
       } catch {}
     }
+
     try {
-      const result = await espnFetchWeek(week);
+      const anchor = new Date(anchorTs);
+      const isCurrent = anchorTs >= todayMidnight() - 86400000;
+      let result: RodadaData;
+
+      if (isCurrent) {
+        // Janela atual: de hoje até +14 dias
+        const future = new Date(anchor.getTime() + 14 * 86400000);
+        result = await espnDateRange(anchor, future);
+
+        // Fallback ao endpoint padrão (pode ter jogo ao vivo)
+        if (result.matches.length === 0) {
+          const res  = await fetch(ESPN_BASE);
+          const json = await res.json();
+          result = {
+            matches: parseMatches(json.events ?? []),
+            roundNumber: json.week?.number ?? extractRound(json.events ?? []),
+          };
+        }
+
+        // Tenta estender para 30 dias
+        if (result.matches.length === 0) {
+          const far = new Date(anchor.getTime() + 30 * 86400000);
+          result = await espnDateRange(anchor, far);
+        }
+      } else {
+        // Histórico: janela de 8 dias centrada no anchor
+        const start = new Date(anchor.getTime() - 3 * 86400000);
+        const end   = new Date(anchor.getTime() + 5 * 86400000);
+        result = await espnDateRange(start, end);
+      }
+
       localStorage.setItem(cacheKey, JSON.stringify({ payload: result, ts: Date.now() }));
       setData(result);
-    } catch { setError(true); }
-    finally   { setLoading(false); }
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, [week]);
+  useEffect(() => { load(); }, [anchorTs]);
   return { data, loading, error, refetch: () => load(true) };
 }
 
@@ -341,28 +374,36 @@ function Login({ onLogin, isDark, toggleTheme }: { onLogin: () => void; isDark: 
 function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: number | string) => void }) {
   const d = isDark;
 
-  const [liveWeek,  setLiveWeek]  = useState<number>(0);   // rodada "ao vivo" detectada
-  const [viewWeek,  setViewWeek]  = useState<number>(0);   // rodada sendo exibida
-  const [detected,  setDetected]  = useState(false);       // já detectou?
+  const [anchorTs, setAnchorTs] = useState(() => todayMidnight());
+  const { data, loading, error, refetch } = useRodada(anchorTs);
 
-  // Detecta rodada ao vivo uma única vez
-  useEffect(() => {
-    detectLiveWeek().then(w => {
-      setLiveWeek(w);
-      setViewWeek(w);
-      setDetected(true);
-    });
-  }, []);
-
-  const { data, loading, error, refetch } = useRodada(viewWeek || 1);
+  const isCurrentRound = anchorTs >= todayMidnight() - 86400000;
 
   useEffect(() => {
-    if (viewWeek) onRoundLoad(viewWeek);
-  }, [viewWeek]);
+    if (data?.roundNumber) onRoundLoad(data.roundNumber);
+  }, [data?.roundNumber, anchorTs]);
 
-  const isHistorico = viewWeek < liveWeek;
-  const goBack    = () => { if (viewWeek > 1)        setViewWeek(v => v - 1); };
-  const goForward = () => { if (viewWeek < liveWeek) setViewWeek(v => v + 1); };
+  const goBack = () => {
+    // Ancora 10 dias antes do primeiro jogo da janela atual
+    const earliest = data?.matches.length
+      ? data.matches.reduce((m, x) => Math.min(m, new Date(x.date).getTime()), Infinity)
+      : anchorTs;
+    const next = new Date(earliest - 10 * 86400000);
+    next.setHours(0, 0, 0, 0);
+    setAnchorTs(next.getTime());
+  };
+
+  const goForward = () => {
+    if (isCurrentRound) return;
+    // Ancora 3 dias após o último jogo da janela atual
+    const latest = data?.matches.length
+      ? data.matches.reduce((m, x) => Math.max(m, new Date(x.date).getTime()), -Infinity)
+      : anchorTs;
+    const next = new Date(latest + 3 * 86400000);
+    next.setHours(0, 0, 0, 0);
+    // não passa de hoje
+    setAnchorTs(Math.min(next.getTime(), todayMidnight()));
+  };
 
   type ScoreMap = Record<string, { home: string; away: string }>;
   const [scores,    setScores]    = useState<ScoreMap>({});
@@ -438,16 +479,16 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         <button onClick={goBack}
           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
           style={{ background: T.elevated(d) }}
-          disabled={loading || !detected || viewWeek <= 1}>
+          disabled={loading}>
           <ChevronLeft size={16} style={{ color: T.text(d) }} />
         </button>
 
         <div className="text-center">
           <p className="font-black text-sm" style={{ color: T.text(d) }}>
-            {detected ? `Rodada ${viewWeek}` : 'Carregando...'}
+            {loading ? 'Carregando...' : data?.roundNumber !== '?' ? `Rodada ${data?.roundNumber}` : 'Rodada atual'}
           </p>
-          {isHistorico ? (
-            <button onClick={() => setViewWeek(liveWeek)}
+          {!isCurrentRound ? (
+            <button onClick={() => setAnchorTs(todayMidnight())}
               className="text-[10px] font-bold text-amber-400 underline underline-offset-2">
               Ir para atual
             </button>
@@ -459,13 +500,13 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         <button onClick={goForward}
           className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90 disabled:opacity-30"
           style={{ background: T.elevated(d) }}
-          disabled={loading || !detected || !isHistorico}>
+          disabled={loading || isCurrentRound}>
           <ChevronRight size={16} style={{ color: T.text(d) }} />
         </button>
       </div>
 
       {/* Progress (só mostra na rodada atual) */}
-      {!isHistorico && (
+      {isCurrentRound && (
       <div className="rounded-xl p-4 flex items-center justify-between border"
         style={{ background: d ? 'rgba(251,191,36,0.07)' : 'rgba(251,191,36,0.06)', borderColor: d ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.2)' }}>
         <div>
@@ -500,7 +541,7 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
       )} {/* fim !isHistorico */}
 
       {/* Banner histórico */}
-      {isHistorico && (
+      {!isCurrentRound && (
         <div className="rounded-xl px-4 py-3 flex items-center gap-2 border"
           style={{ background: 'rgba(99,102,241,0.08)', borderColor: 'rgba(99,102,241,0.2)' }}>
           <Trophy size={13} className="text-indigo-400 shrink-0" />
@@ -513,8 +554,8 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         const sh     = scores[match.id]?.home ?? '';
         const sa     = scores[match.id]?.away ?? '';
         // Em modo histórico, trata todos como encerrados visualmente
-        const closed = match.status === 'STATUS_FINAL' || isHistorico;
-        const live   = !isHistorico && (match.status === 'STATUS_IN_PROGRESS' || match.status === 'STATUS_HALFTIME');
+        const closed = match.status === 'STATUS_FINAL' || !isCurrentRound;
+        const live   = isCurrentRound && (match.status === 'STATUS_IN_PROGRESS' || match.status === 'STATUS_HALFTIME');
 
         return (
           <motion.div key={match.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
@@ -592,8 +633,8 @@ function Apostar({ isDark, onRoundLoad }: { isDark: boolean; onRoundLoad: (n: nu
         );
       })}
 
-      {/* Submit */}
-      {openMatches.length > 0 && (
+      {/* Submit — só na rodada atual */}
+      {isCurrentRound && openMatches.length > 0 && (
         <div className="pt-2">
           <AnimatePresence mode="wait">
             {submitted ? (
