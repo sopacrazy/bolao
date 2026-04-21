@@ -1199,7 +1199,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                 ) : (
                   // Bet inputs
                   <>
-                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sh} placeholder="0"
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sh} placeholder=""
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'home', e.target.value)}
                       className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
@@ -1209,7 +1209,7 @@ function Apostar({ isDark, onRoundLoad, user }: { isDark: boolean; onRoundLoad: 
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
                     </div>
-                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sa} placeholder="0"
+                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={sa} placeholder=""
                       disabled={isLocked}
                       onChange={e => setScore(match.id, 'away', e.target.value)}
                       className="w-12 h-12 rounded-xl text-center text-xl font-black outline-none transition-all placeholder:text-slate-600 disabled:opacity-80"
