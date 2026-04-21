@@ -43,7 +43,7 @@ const LEAGUES: Record<League, { label: string; short: string; color: string }> =
 const espnBase   = (lg: League) => `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard`;
 const espnSummary = (lg: League) => `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/summary`;
 const CACHE_KEY = 'bolao_espn_v3';
-const CACHE_TTL = 60 * 60 * 1000; // 1h
+const CACHE_TTL = 90 * 1000; // 90s
 
 // Formata Date → "YYYYMMDD"
 function ymd(d: Date) {
