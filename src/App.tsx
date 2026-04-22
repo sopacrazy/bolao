@@ -31,6 +31,10 @@ import {
   CheckCircle2,
   Clock,
   Gamepad2,
+  Sparkles,
+  Bot,
+  Flag,
+  Zap,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
@@ -441,7 +445,7 @@ const T = {
   rankItem: (d: boolean) =>
     d ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.8)",
   rankBdr: (d: boolean) => (d ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.06)"),
-  avatarBg: (d: boolean) => (d ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.06)"),
+  avatarBg: (d: boolean) => "#FFFFFF",
   avatarText: (d: boolean) => (d ? "#94A3B8" : "#64748B"),
 };
 
@@ -984,6 +988,290 @@ function StandingsModal({
                 </div>
               </div>
             )}
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+const analysisCache: Record<string, any> = {};
+
+function AIAnalysisModal({
+  match,
+  onClose,
+  isDark,
+}: {
+  match: Match;
+  onClose: () => void;
+  isDark: boolean;
+}) {
+  const [data, setData] = useState<any | null>(analysisCache[match.id] || null);
+  const [loading, setLoading] = useState(!analysisCache[match.id]);
+  const d = isDark;
+
+  useEffect(() => {
+    async function getAnalysis() {
+      if (analysisCache[match.id]) {
+        setData(analysisCache[match.id]);
+        setLoading(false);
+        return;
+      }
+
+      if (!process.env.OPENAI_API_KEY) {
+        setData({ error: "Chave da OpenAI não configurada." });
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setData(null); // Limpa para evitar mostrar a análise anterior
+      try {
+        // 1. Pegar classificação via ESPN para dar contexto real à IA
+        let standingsInfo = "";
+        try {
+          const res = await fetch("https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings");
+          const standingsData = await res.json();
+          const list = standingsData.children[0].standings.entries;
+          const homePos = list.find((e: any) => e.team.displayName.includes(match.homeName))?.stats.find((s: any) => s.name === "rank")?.value;
+          const awayPos = list.find((e: any) => e.team.displayName.includes(match.awayName))?.stats.find((s: any) => s.name === "rank")?.value;
+          if (homePos && awayPos) {
+            standingsInfo = `Classificação Atual: ${match.homeName} (${homePos}º) vs ${match.awayName} (${awayPos}º)`;
+          }
+        } catch (e) { /* ignore */ }
+
+        const prompt = `Você é o Analista Pro do Bolão dos Clássicos, a inteligência mais avançada em estatísticas de futebol brasileiro. Forneça uma análise técnica e profunda para o confronto: ${match.homeName} vs ${match.awayName}.
+
+CONTEXTO:
+- ${standingsInfo || "Considere a força histórica e o momento atual das equipes no Brasileirão/Série C."}
+- Analise taticamente o estilo de jogo das equipes em 2024/2025.
+
+REGRAS DE OURO:
+1. NÃO use probabilidades genéricas. Se houver favoritismo, a porcentagem deve ser alta (ex: 60-80%).
+2. Seja preciso no mercado de gols e escanteios baseado na agressividade tática das equipes.
+3. Varie os placares exatos (não use sempre 2x1). Use 1x0, 0x0, 3x1, 2x2, etc.
+4. Dica de Ouro: Forneça um padrão real ou curiosidade histórica única deste confronto.
+
+Sua resposta deve ser APENAS o JSON puro:
+{
+  "resumo": "Uma resenha ácida e técnica de alto nível (max 140 chars)",
+  "probabilidades": {"casa": VALOR_INT, "empate": VALOR_INT, "fora": VALOR_INT},
+  "gols": {"over15": VALOR_INT, "over25": VALOR_INT, "ambosMarcam": "Sim/Não"},
+  "escanteios": {"probabilidade": VALOR_INT, "label": "+8.5 ou +9.5 ou +10.5"},
+  "palpite": "PLACAR_EXATO",
+  "dica": "CURIOSIDADE OU PADRÃO HISTÓRICO ÚNICO (Frase impactante)"
+}
+Soma das probabilidades = 100.`;
+
+        const response = await fetch(
+          "https://api.openai.com/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            },
+            body: JSON.stringify({
+              model: "gpt-4o",
+              messages: [{ role: "user", content: prompt }],
+              temperature: 0.7,
+            }),
+          },
+        );
+
+        if (!response.ok) throw new Error("API Error");
+        const resData = await response.json();
+        const content = resData.choices[0].message.content.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(content);
+        analysisCache[match.id] = parsed;
+        setData(parsed);
+      } catch (err) {
+        console.error(err);
+        setData({ error: "Erro ao gerar análise técnica." });
+      } finally {
+        setLoading(false);
+      }
+    }
+    getAnalysis();
+  }, [match.id]);
+
+  const StatBar = ({ label, value, color }: any) => (
+    <div className="space-y-1.5">
+      <div className="flex justify-between text-[10px] font-black uppercase tracking-wider opacity-60">
+        <span>{label}</span>
+        <span>{value}%</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-white/5 overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${value}%` }}
+          className="h-full rounded-full"
+          style={{ background: color }}
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[200] flex flex-col justify-end"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <div
+          className="absolute inset-0 bg-slate-950/70 backdrop-blur-md"
+          onClick={onClose}
+        />
+        <motion.div
+          className="relative z-10 w-full max-w-lg mx-auto rounded-t-[2.5rem] overflow-hidden flex flex-col"
+          style={{ background: T.bg(d), maxHeight: "90dvh" }}
+          initial={{ y: "100%" }}
+          animate={{ y: 0 }}
+          exit={{ y: "100%" }}
+          transition={{ type: "spring", damping: 32, stiffness: 350 }}
+        >
+          <div className="p-1.5 flex justify-center shrink-0">
+             <div className="w-10 h-1.5 rounded-full mt-2" style={{ background: T.border(d) }} />
+          </div>
+
+          <div className="p-6 pb-2 shrink-0">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-4">
+                <div className="flex -space-x-4 shrink-0">
+                   <img src={match.homeLogo} className="w-14 h-14 object-contain relative z-10 bg-white rounded-full p-2 border-2 border-white shadow-md" alt="" />
+                   <img src={match.awayLogo} className="w-14 h-14 object-contain relative z-0 bg-white rounded-full p-2 border-2 border-white shadow-md" alt="" />
+                </div>
+                <h3 className="font-black text-xl tracking-tight" style={{ color: T.text(d) }}>Analista Pro</h3>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+              >
+                <X size={20} style={{ color: T.text(d) }} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-6 pb-8 space-y-6 custom-scrollbar">
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-24 gap-6">
+                <div className="relative">
+                  <motion.div
+                    className="w-20 h-20 rounded-full border-[3px] border-amber-400/10 border-t-amber-400"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  />
+                  <Bot size={32} className="absolute inset-0 m-auto text-amber-400 animate-pulse" />
+                </div>
+                <p className="text-sm font-black animate-pulse" style={{ color: T.text(d) }}>Cruzando Big Data...</p>
+              </div>
+            ) : data?.error ? (
+               <div className="text-center py-20 space-y-4">
+                 <AlertCircle size={40} className="mx-auto text-red-400 opacity-20" />
+                 <p className="text-sm font-bold opacity-60" style={{ color: T.text(d) }}>{data.error}</p>
+               </div>
+            ) : (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                
+                {/* Resumo */}
+                <div className="p-4 rounded-2xl border bg-white/5" style={{ borderColor: T.border(d) }}>
+                  <p className="text-sm font-semibold italic leading-relaxed" style={{ color: T.text(d) }}>
+                    "{data.resumo}"
+                  </p>
+                </div>
+
+                {/* Probabilidades de Vitória */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp size={14} className="text-amber-400" />
+                    <h4 className="text-[10px] font-black uppercase tracking-widest opacity-40" style={{ color: T.text(d) }}>Chance de Vitória</h4>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4">
+                    <StatBar label={`Vitória ${match.homeName}`} value={data.probabilidades.casa} color="#FBBF24" />
+                    <StatBar label="Empate" value={data.probabilidades.empate} color="#94A3B8" />
+                    <StatBar label={`Vitória ${match.awayName}`} value={data.probabilidades.fora} color="#F59E0B" />
+                  </div>
+                </div>
+
+                {/* Grid Gols e Escanteios */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-4 rounded-2xl border space-y-3" style={{ borderColor: T.border(d), background: T.surface(d) }}>
+                    <div className="flex items-center gap-2 opacity-40">
+                      <Target size={14} style={{ color: T.text(d) }} />
+                      <span className="text-[9px] font-black uppercase tracking-wider">Mercado de Gols</span>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold" style={{ color: T.textMuted(d) }}>+1.5 Gols</span>
+                        <span className="text-[10px] font-black text-emerald-400">{data.gols.over15}%</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold" style={{ color: T.textMuted(d) }}>Ambos Marcam</span>
+                        <span className="text-[10px] font-black text-amber-400">{data.gols.ambosMarcam}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl border space-y-3" style={{ borderColor: T.border(d), background: T.surface(d) }}>
+                    <div className="flex items-center gap-2 opacity-40">
+                      <Flag size={14} style={{ color: T.text(d) }} />
+                      <span className="text-[9px] font-black uppercase tracking-wider">Escanteios</span>
+                    </div>
+                    <div className="space-y-2">
+                       <div className="flex items-center justify-between">
+                         <span className="text-[10px] font-bold" style={{ color: T.textMuted(d) }}>{data.escanteios.label}</span>
+                         <span className="text-[10px] font-black text-amber-400">{data.escanteios.probabilidade}%</span>
+                       </div>
+                       <div className="h-1 w-full rounded-full bg-white/5 overflow-hidden">
+                         <motion.div
+                           initial={{ width: 0 }}
+                           animate={{ width: `${data.escanteios.probabilidade}%` }}
+                           className="h-full bg-amber-400 rounded-full"
+                         />
+                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Palpite e Dica */}
+                <div className="p-5 rounded-3xl border relative overflow-hidden" style={{ borderColor: T.border(d), background: 'linear-gradient(135deg, rgba(251,191,36,0.1) 0%, transparent 100%)' }}>
+                   <div className="absolute top-0 right-0 p-4 opacity-5">
+                      <Trophy size={80} />
+                   </div>
+                   <div className="relative z-10 space-y-4">
+                     <div className="flex items-center justify-between">
+                        <div>
+                           <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1" style={{ color: T.text(d) }}>Palpite do Especialista</p>
+                           <div className="flex items-center gap-3">
+                              <span className="text-3xl font-black text-amber-400 tracking-tighter">{data.palpite}</span>
+                              <div className="px-2 py-1 rounded-md bg-amber-400 text-slate-900 text-[10px] font-black italic">PRO</div>
+                           </div>
+                        </div>
+                     </div>
+                     <div className="flex items-start gap-3 pt-3 border-t" style={{ borderColor: T.border(d) }}>
+                        <Zap size={16} className="text-amber-400 shrink-0 mt-0.5" />
+                        <p className="text-xs font-bold leading-relaxed" style={{ color: T.text(d) }}>
+                          <span className="opacity-40 uppercase text-[9px] block mb-1">Dica de Ouro</span>
+                          {data.dica}
+                        </p>
+                     </div>
+                   </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-6 pt-2 shrink-0 border-t" style={{ borderColor: T.border(d), background: T.surface(d) }}>
+            <button
+              onClick={onClose}
+              className="w-full py-4 rounded-2xl font-black text-sm tracking-widest uppercase transition-all active:scale-95 shadow-lg shadow-amber-400/10"
+              style={{ background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)", color: "#0C1120" }}
+            >
+              Copiar Palpite
+            </button>
           </div>
         </motion.div>
       </motion.div>
@@ -2080,7 +2368,7 @@ function Apostar({
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: idx * 0.04 }}
-            className="rounded-2xl overflow-hidden border"
+            className="rounded-2xl overflow-hidden border relative"
             style={{ background: cardBg, borderColor: cardBorderColor }}
           >
             <div className="px-4 pt-3 pb-1 flex items-center justify-between">
@@ -4088,23 +4376,113 @@ function UserBetsList({
   );
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── Analista IA View ────────────────────────────────────────────────────────
+function AnalistaView({ 
+  isDark, 
+  onAnalyze 
+}: { 
+  isDark: boolean; 
+  onAnalyze: (m: Match) => void 
+}) {
+  const d = isDark;
+  const [anchorTs] = useState(() => todayMidnight());
+  const espn = useRodada(anchorTs, "bra.1");
+  const seriec = useSerieCRodada(false);
+  
+  const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
+  const [liberatedLoading, setLiberatedLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchLiberated = async () => {
+      const { data } = await supabase
+        .from("jogos_selecionados")
+        .select("match_id")
+        .eq("liberado", true);
+      if (data) setLiberatedIds(data.map((x: any) => x.match_id));
+      setLiberatedLoading(false);
+    };
+    fetchLiberated();
+  }, []);
+
+  const loading = espn.loading || seriec.loading || liberatedLoading;
+  const matches = [
+    ...(espn.data?.matches ?? []).map(m => ({ ...m, league: "bra.1" as const })),
+    ...(seriec.data?.matches ?? []).map(m => ({ ...m, league: "bra.3" as const }))
+  ].filter(m => liberatedIds.includes(m.id) && m.status !== "STATUS_FINAL");
+
+  if (loading) return (
+    <div className="py-10 flex flex-col items-center gap-3 opacity-40">
+      <RefreshCw size={24} className="animate-spin text-amber-400" />
+      <span className="text-[10px] font-black uppercase tracking-widest">Escaneando Rodada...</span>
+    </div>
+  );
+
+  if (matches.length === 0) return (
+    <div className="py-16 text-center space-y-4">
+      <div className="w-16 h-16 rounded-3xl bg-white/5 border border-white/5 flex items-center justify-center mx-auto">
+        <Bot size={28} className="text-amber-400 opacity-20" />
+      </div>
+      <p className="text-sm font-bold opacity-30" style={{ color: T.text(d) }}>Nenhum jogo disponível para análise no momento.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3 pb-20">
+      <div className="p-4 rounded-2xl bg-amber-400/5 border border-amber-400/10 mb-4">
+        <p className="text-[10px] font-black text-amber-400 uppercase tracking-widest mb-1">Dica do Analista</p>
+        <p className="text-xs opacity-60 leading-relaxed" style={{ color: T.text(d) }}>
+          Escolha um confronto abaixo para receber uma análise técnica profunda baseada no momento atual das equipes.
+        </p>
+      </div>
+
+      {matches.map((match, idx) => (
+        <motion.div
+          key={match.id}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: idx * 0.05 }}
+          className="p-4 rounded-2xl border flex items-center justify-between gap-4 transition-all active:scale-[0.98]"
+          style={{ background: T.surface(d), borderColor: T.border(d) }}
+        >
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="flex -space-x-2 shrink-0">
+               <img src={match.homeLogo} className="w-8 h-8 object-contain relative z-10 bg-white rounded-full p-1 border border-white/10 shadow-sm" alt="" />
+               <img src={match.awayLogo} className="w-8 h-8 object-contain relative z-0 bg-white rounded-full p-1 border border-white/5 shadow-sm" alt="" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black truncate" style={{ color: T.text(d) }}>{match.homeName} × {match.awayName}</p>
+              <p className="text-[9px] font-bold opacity-40 uppercase" style={{ color: T.text(d) }}>{fmtDate(match.date)}</p>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => onAnalyze(match)}
+            className="px-4 py-2 rounded-xl bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider shadow-lg shadow-amber-400/10 active:scale-90 transition-all"
+          >
+            Analisar
+          </button>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 const tabs = [
   { key: "apostar", label: "Palpites", Icon: Target },
   { key: "ranking", label: "Ranking", Icon: Trophy },
-  { key: "info", label: "Resumo", Icon: Info },
+  { key: "analista", label: "Analista IA", Icon: Bot },
   { key: "admin", label: "Painel", Icon: Shield, adminOnly: true },
 ] as const;
 
-type Tab = "apostar" | "ranking" | "info" | "admin";
+type Tab = "apostar" | "ranking" | "analista" | "admin";
 
 const headerContent: Record<Tab, { title: string; sub: string }> = {
   apostar: { title: "", sub: "Faça seus palpites" },
   ranking: { title: "Ranking Geral", sub: "Classificação ao vivo" },
-  info: { title: "Resumo", sub: "Financeiro do bolão" },
+  analista: { title: "Analista Pro", sub: "Inteligência de Dados" },
   admin: { title: "Administrador", sub: "Gerenciar rodadas" },
 };
 
@@ -4115,6 +4493,7 @@ export default function App() {
   const [isDark, setIsDark] = useState(false);
   const [roundNumber, setRoundNumber] = useState<number | string>("...");
   const [totalUserPoints, setTotalUserPoints] = useState(0);
+  const [aiMatch, setAiMatch] = useState<Match | null>(null);
 
   useEffect(() => {
     const savedUser = localStorage.getItem("bolao_user");
@@ -4336,15 +4715,18 @@ export default function App() {
                 <Ranking isDark={isDark} user={user} />
               </motion.div>
             )}
-            {tab === "info" && (
+            {tab === "analista" && (
               <motion.div
-                key="info"
+                key="analista"
                 initial={{ opacity: 0, x: -12 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 12 }}
                 transition={{ duration: 0.2 }}
               >
-                <Informativo isDark={isDark} />
+                <AnalistaView 
+                  isDark={isDark} 
+                  onAnalyze={(m) => setAiMatch(m)}
+                />
               </motion.div>
             )}
             {tab === "admin" && (
@@ -4419,6 +4801,15 @@ export default function App() {
         <StandingsModal
           isDark={isDark}
           onClose={() => setShowStandings(false)}
+        />
+      )}
+
+      {/* Modal de Análise IA */}
+      {aiMatch && (
+        <AIAnalysisModal
+          match={aiMatch}
+          onClose={() => setAiMatch(null)}
+          isDark={isDark}
         />
       )}
     </div>

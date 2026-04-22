@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Bolão</string>
+    <string name="title_activity_main">Bolão</string>
+    <string name="package_name">com.sistemaadr.bolao</string>
+    <string name="custom_url_scheme">com.sistemaadr.bolao</string>
+</resources>
