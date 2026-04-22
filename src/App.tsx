@@ -1961,47 +1961,26 @@ function Apostar({
       {/* Progress (só mostra na rodada atual) */}
       {isCurrentRound && (
         <div
-          className="rounded-xl p-4 flex items-center justify-between border"
+          className="rounded-2xl p-6 flex items-center justify-center border overflow-hidden relative min-h-[160px]"
           style={{
-            background: d ? "rgba(251,191,36,0.07)" : "rgba(251,191,36,0.06)",
-            borderColor: d ? "rgba(251,191,36,0.15)" : "rgba(251,191,36,0.2)",
+            background: "#FFFFFF",
+            backgroundImage: "url('/assets/flyer.png')",
+            backgroundSize: "contain",
+            backgroundRepeat: "no-repeat",
+            backgroundPosition: "left center",
+            borderColor: "rgba(0,0,0,0.08)",
           }}
         >
-          <div>
-            <p className="font-bold text-sm" style={{ color: T.text(d) }}>
-              {filledCount} de {openMatches.length} palpites
-            </p>
-            <p
-              className="text-xs mt-0.5 flex items-center gap-1.5"
-              style={{ color: T.textMuted(d) }}
-            >
-              <Wifi size={11} style={{ color: LEAGUES["bra.1"].color }} />
-              ESPN + TheSportsDB •{" "}
-              <span className="font-bold" style={{ color: LEAGUES["bra.1"].color }}>
-                Série A + C
-              </span>
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={refetch}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all active:scale-90"
-              style={{
-                background: T.surface(d),
-                border: `1px solid ${T.border(d)}`,
-              }}
-            >
-              <RefreshCw size={13} style={{ color: T.textMuted(d) }} />
-            </button>
+          <div className="relative z-10 ml-auto mr-1">
             {openMatches.length > 0 && (
-              <div className="relative w-12 h-12">
-                <svg className="w-12 h-12 -rotate-90" viewBox="0 0 44 44">
+              <div className="relative w-24 h-24 drop-shadow-xl">
+                <svg className="w-24 h-24 -rotate-90" viewBox="0 0 44 44">
                   <circle
                     cx="22"
                     cy="22"
                     r="18"
-                    fill="none"
-                    stroke={d ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.08)"}
+                    fill="rgba(0,0,0,0.03)"
+                    stroke="rgba(0,0,0,0.05)"
                     strokeWidth="4"
                   />
                   <circle
@@ -2009,18 +1988,18 @@ function Apostar({
                     cy="22"
                     r="18"
                     fill="none"
-                    stroke="#FBBF24"
+                    stroke="#39FF14"
                     strokeWidth="4"
                     strokeDasharray={`${(filledCount / openMatches.length) * 113} 113`}
                     strokeLinecap="round"
+                    style={{ filter: "drop-shadow(0 0 8px rgba(57,255,20,0.6))" }}
                   />
                 </svg>
-                <span
-                  className="absolute inset-0 flex items-center justify-center font-black text-xs"
-                  style={{ color: T.text(d) }}
-                >
-                  {Math.round((filledCount / (openMatches.length || 1)) * 100)}%
-                </span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="font-black text-xl text-slate-800">
+                    {Math.round((filledCount / (openMatches.length || 1)) * 100)}%
+                  </span>
+                </div>
               </div>
             )}
           </div>
