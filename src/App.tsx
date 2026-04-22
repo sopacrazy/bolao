@@ -671,28 +671,24 @@ function useStandings(league: League = "bra.1") {
       for (const url of urls) {
         try {
           const json = await tryFetch(url);
-          let entries: any[] = [];
+          let rawEntries: any[] = [];
           
-          if (json.standings?.[0]?.entries) {
-            entries = json.standings[0].entries;
-          } else if (json.children?.[0]?.standings?.entries) {
-            entries = json.children[0].standings.entries;
-          } else {
-            const find = (o: any, d = 0): any[] => {
-              if (!o || d > 5) return [];
-              if (Array.isArray(o.entries) && o.entries.length > 2) return o.entries;
-              for (const k of Object.keys(o)) {
-                if (typeof o[k] === "object") {
-                  const r = find(o[k], d + 1);
-                  if (r.length) return r;
-                }
-              }
-              return [];
-            };
-            entries = find(json);
-          }
+          const collectEntries = (o: any, d = 0) => {
+            if (!o || d > 6) return;
+            if (Array.isArray(o.entries) && o.entries.length > 0) {
+              rawEntries.push(...o.entries);
+            }
+            if (o.children && Array.isArray(o.children)) {
+              o.children.forEach((c: any) => collectEntries(c, d + 1));
+            }
+            if (o.standings && typeof o.standings === "object") {
+              collectEntries(o.standings, d + 1);
+            }
+          };
+          
+          collectEntries(json);
 
-          if (entries.length > 0) {
+          if (rawEntries.length > 0) {
             const getStat = (stats: any[], ...names: string[]) => {
               for (const name of names) {
                 const s = stats.find(
@@ -703,12 +699,12 @@ function useStandings(league: League = "bra.1") {
               return 0;
             };
 
-            const parsed: StandingEntry[] = entries
-              .map((e: any, i: number) => {
+            const parsed: StandingEntry[] = rawEntries
+              .map((e: any) => {
                 const stats: any[] = e.stats ?? [];
                 const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
                 return {
-                  pos: i + 1,
+                  pos: 0,
                   teamAbbr: e.team?.abbreviation ?? "?",
                   teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? "?",
                   teamLogo: logo,
@@ -723,7 +719,13 @@ function useStandings(league: League = "bra.1") {
                 };
               })
               .filter((v, i, a) => a.findIndex(t => t.teamAbbr === v.teamAbbr) === i)
-              .sort((a, b) => a.pos - b.pos);
+              .sort((a, b) => {
+                if (b.points !== a.points) return b.points - a.points;
+                if (b.wins !== a.wins) return b.wins - a.wins;
+                if (b.gd !== a.gd) return b.gd - a.gd;
+                return b.gf - a.gf;
+              })
+              .map((item, idx) => ({ ...item, pos: idx + 1 }));
 
             if (parsed.length > 0) {
               localStorage.setItem(cacheKey, JSON.stringify({ payload: parsed, ts: Date.now() }));
