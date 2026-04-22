@@ -4289,7 +4289,11 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
         }
       });
       
-      if (res.status === 401) throw new Error("Chave Inválida. A chave do seu arquivo supabase.ts é pública e não tem permissão de monitoramento. Você precisa de um 'Access Token' (Management Token) do painel do Supabase.");
+      if (res.status === 401) {
+        setError("Chave Inválida ou Sem Permissão. O Supabase rejeitou o token. Tente gerar um NOVO 'Access Token' no painel e colar abaixo.");
+        setData(null);
+        return;
+      }
       if (!res.ok) throw new Error("Erro ao consultar API: " + res.status);
       
       const json = await res.json();
