@@ -842,7 +842,7 @@ function StandingsModal({
                     Classificação indisponível
                   </p>
                   <p className="text-xs px-8" style={{ color: T.textMuted(d) }}>
-                    Não conseguimos carregar os dados da {lg === "bra.1" ? "Série A" : "Série C"} no momento.
+                    Não conseguimos carregar os dados da Série A no momento.
                   </p>
                 </div>
                 <button 
