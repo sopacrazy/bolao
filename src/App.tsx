@@ -577,8 +577,6 @@ function fmtDate(iso: string) {
   );
 }
 
-// ─── Team Logo ────────────────────────────────────────────────────────────────
-
 function TeamLogo({
   src,
   abbr,
@@ -632,15 +630,16 @@ interface StandingEntry {
 const STANDINGS_CACHE_KEY = "bolao_standings_v3";
 const STANDINGS_TTL = 30 * 60 * 1000;
 
-function useStandings() {
+function useStandings(league: League = "bra.1") {
   const [data, setData] = useState<StandingEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
   useEffect(() => {
     setLoading(true);
+    const cacheKey = `${STANDINGS_CACHE_KEY}_${league}`;
     try {
-      const raw = localStorage.getItem(STANDINGS_CACHE_KEY);
+      const raw = localStorage.getItem(cacheKey);
       if (raw) {
         const { payload, ts } = JSON.parse(raw);
         if (Date.now() - ts < STANDINGS_TTL) {
@@ -658,31 +657,26 @@ function useStandings() {
       });
     const yr = new Date().getFullYear();
 
-    // Tenta múltiplos endpoints ESPN (2025 e 2026 pois ESPN rotula a temporada corrente como próximo ano)
     Promise.any([
       tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}&seasontype=2`,
+        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr}&seasontype=2`,
       ),
       tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr + 1}&seasontype=2`,
+        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr + 1}&seasontype=2`,
       ),
       tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}`,
+        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr}`,
       ),
       tryFetch(
-        `https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/standings`,
+        `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/standings`,
       ),
     ])
       .then((json) => {
-        // ESPN pode retornar entries direto ou dentro de standings/children/groups/season
         const findEntries = (o: any, depth = 0): any[] => {
           if (!o || typeof o !== "object" || depth > 8) return [];
-          // Direct entries array with team objects
           if (Array.isArray(o.entries) && o.entries.length > 2 && o.entries[0]?.team)
             return o.entries;
-          // Array of team objects directly
           if (Array.isArray(o) && o.length > 2 && o[0]?.team) return o;
-          // Recurse into all keys: arrays → iterate elements, objects → recurse
           for (const key of Object.keys(o)) {
             const val = o[key];
             if (Array.isArray(val)) {
@@ -730,14 +724,14 @@ function useStandings() {
         });
 
         localStorage.setItem(
-          STANDINGS_CACHE_KEY,
+          cacheKey,
           JSON.stringify({ payload: parsed, ts: Date.now() }),
         );
         setData(parsed);
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, []);
+  }, [league]);
 
   return { data, loading, error };
 }
@@ -750,7 +744,8 @@ function StandingsModal({
   onClose: () => void;
 }) {
   const d = isDark;
-  const { data, loading, error } = useStandings();
+  const [lg, setLg] = useState<League>("bra.1");
+  const { data, loading, error } = useStandings(lg);
 
   return (
     <AnimatePresence>
@@ -773,7 +768,6 @@ function StandingsModal({
           exit={{ y: "100%" }}
           transition={{ type: "spring", damping: 30, stiffness: 320 }}
         >
-          {/* Handle */}
           <div className="flex justify-center pt-3 pb-1 shrink-0">
             <div
               className="w-10 h-1 rounded-full"
@@ -781,9 +775,8 @@ function StandingsModal({
             />
           </div>
 
-          {/* Header */}
           <div
-            className="px-5 pt-2 pb-4 shrink-0"
+            className="px-5 pt-2 pb-4 shrink-0 space-y-3"
             style={{ borderBottom: `1px solid ${T.border(d)}` }}
           >
             <div className="flex items-center justify-between">
@@ -793,7 +786,7 @@ function StandingsModal({
                   className="text-xs font-bold uppercase tracking-wider"
                   style={{ color: T.textMuted(d) }}
                 >
-                  Brasileirão Série A 2025
+                  Classificação {LEAGUES[lg].label}
                 </p>
               </div>
               <button
@@ -807,9 +800,28 @@ function StandingsModal({
                 <X size={13} style={{ color: T.textMuted(d) }} />
               </button>
             </div>
+
+            <div className="flex p-1 rounded-xl bg-slate-950/5 border" style={{ borderColor: T.border(d) }}>
+              {(Object.keys(LEAGUES) as League[]).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setLg(key)}
+                  className="flex-1 py-2 rounded-lg text-[10px] font-black transition-all relative"
+                  style={{ color: lg === key ? T.text(d) : T.textMuted(d) }}
+                >
+                  {lg === key && (
+                    <motion.div
+                      layoutId="lgTab"
+                      className="absolute inset-0 rounded-lg shadow-sm"
+                      style={{ background: T.surface(d) }}
+                    />
+                  )}
+                  <span className="relative z-10">{LEAGUES[key].label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Content */}
           <div className="flex-1 overflow-y-auto px-4 py-4">
             {loading && (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
@@ -842,7 +854,6 @@ function StandingsModal({
 
             {data && data.length > 0 && (
               <div>
-                {/* Column headers */}
                 <div
                   className="flex items-center px-2 pb-2 text-[9px] font-bold uppercase tracking-wider"
                   style={{ color: T.textMuted(d) }}
@@ -861,19 +872,19 @@ function StandingsModal({
 
                 <div className="space-y-1">
                   {data.map((entry, i) => {
-                    const isLibertadores = entry.pos <= 4;
-                    const isSulAmericana = entry.pos >= 5 && entry.pos <= 6;
+                    const isSerieA = lg === "bra.1";
+                    const isLibertadores = isSerieA && entry.pos <= 4;
+                    const isSulAmericana = isSerieA && entry.pos >= 5 && entry.pos <= 6;
+                    const isAvancoSerieC = !isSerieA && entry.pos <= 8;
                     const isRelegation = entry.pos >= data.length - 3;
-                    const rowBg = isLibertadores
-                      ? d
-                        ? "rgba(34,197,94,0.06)"
-                        : "rgba(34,197,94,0.05)"
+                    
+                    const rowBg = (isLibertadores || isAvancoSerieC)
+                      ? d ? "rgba(34,197,94,0.06)" : "rgba(34,197,94,0.05)"
                       : isRelegation
-                        ? d
-                          ? "rgba(248,113,113,0.06)"
-                          : "rgba(248,113,113,0.05)"
+                        ? d ? "rgba(248,113,113,0.06)" : "rgba(248,113,113,0.05)"
                         : T.rankItem(d);
-                    const posColor = isLibertadores
+
+                    const posColor = (isLibertadores || isAvancoSerieC)
                       ? "#22C55E"
                       : isSulAmericana
                         ? "#6366F1"
@@ -883,7 +894,7 @@ function StandingsModal({
 
                     return (
                       <motion.div
-                        key={entry.teamAbbr}
+                        key={`${lg}_${entry.teamAbbr}`}
                         initial={{ opacity: 0, x: -8 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: i * 0.02 }}
@@ -893,17 +904,10 @@ function StandingsModal({
                           border: `1px solid ${T.rankBdr(d)}`,
                         }}
                       >
-                        {/* Position stripe */}
                         <div
                           className="w-1 self-stretch rounded-full mr-2 shrink-0"
                           style={{
-                            background: isLibertadores
-                              ? "#22C55E"
-                              : isSulAmericana
-                                ? "#6366F1"
-                                : isRelegation
-                                  ? "#F87171"
-                                  : "transparent",
+                            background: posColor === T.textMuted(d) ? "transparent" : posColor,
                           }}
                         />
 
@@ -940,50 +944,14 @@ function StandingsModal({
                           </span>
                         </div>
 
-                        <span
-                          className="w-6 text-center text-[11px] shrink-0"
-                          style={{ color: T.textMuted(d) }}
-                        >
-                          {entry.played}
+                        <span className="w-6 text-center text-[11px]" style={{ color: T.textMuted(d) }}>{entry.played}</span>
+                        <span className="w-6 text-center text-[11px] font-bold" style={{ color: T.text(d) }}>{entry.wins}</span>
+                        <span className="w-6 text-center text-[11px]" style={{ color: T.textMuted(d) }}>{entry.draws}</span>
+                        <span className="w-6 text-center text-[11px]" style={{ color: T.textMuted(d) }}>{entry.losses}</span>
+                        <span className="w-8 text-center text-[11px] font-bold" style={{ color: entry.gd > 0 ? "#22C55E" : entry.gd < 0 ? "#F87171" : T.textMuted(d) }}>
+                          {entry.gd > 0 ? "+" : ""}{entry.gd}
                         </span>
-                        <span
-                          className="w-6 text-center text-[11px] font-bold shrink-0"
-                          style={{ color: T.text(d) }}
-                        >
-                          {entry.wins}
-                        </span>
-                        <span
-                          className="w-6 text-center text-[11px] shrink-0"
-                          style={{ color: T.textMuted(d) }}
-                        >
-                          {entry.draws}
-                        </span>
-                        <span
-                          className="w-6 text-center text-[11px] shrink-0"
-                          style={{ color: T.textMuted(d) }}
-                        >
-                          {entry.losses}
-                        </span>
-                        <span
-                          className="w-8 text-center text-[11px] font-bold shrink-0"
-                          style={{
-                            color:
-                              entry.gd > 0
-                                ? "#22C55E"
-                                : entry.gd < 0
-                                  ? "#F87171"
-                                  : T.textMuted(d),
-                          }}
-                        >
-                          {entry.gd > 0 ? "+" : ""}
-                          {entry.gd}
-                        </span>
-                        <span
-                          className="w-8 text-right text-sm font-black shrink-0"
-                          style={{ color: T.text(d) }}
-                        >
-                          {entry.points}
-                        </span>
+                        <span className="w-8 text-right text-sm font-black" style={{ color: T.text(d) }}>{entry.points}</span>
                       </motion.div>
                     );
                   })}
