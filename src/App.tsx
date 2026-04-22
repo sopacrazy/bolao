@@ -4308,7 +4308,7 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
   };
 
   useEffect(() => {
-    if (token && token.length > 50) fetchUsage();
+    fetchUsage();
   }, []);
 
   const ResourceBar = ({ label, current, max, unit }: any) => {
