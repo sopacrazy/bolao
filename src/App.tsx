@@ -1543,16 +1543,6 @@ function Apostar({
   const [sharingPending, setSharingPending] = useState(false);
   const shareRef = React.useRef<HTMLDivElement>(null);
 
-  const banners = ["/assets/flyer.webp", "/assets/flyer2.png"];
-  const [bannerIdx, setBannerIdx] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setBannerIdx((prev) => (prev + 1) % banners.length);
-    }, 5000);
-    return () => clearInterval(timer);
-  }, []);
-
   useEffect(() => {
     if (espn.data?.roundNumber) onRoundLoad(espn.data.roundNumber);
     fetchLiberated();
@@ -2013,49 +2003,18 @@ function Apostar({
         </button>
       </div>
 
-      {/* Banner Carousel */}
+      {/* Banner */}
       {isCurrentRound && (
         <div
           className="relative h-44 rounded-2xl overflow-hidden border shadow-sm"
-          style={{ borderColor: T.border(d) }}
-        >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={bannerIdx}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.5, ease: "easeInOut" }}
-              drag="x"
-              dragConstraints={{ left: 0, right: 0 }}
-              onDragEnd={(_, info) => {
-                if (info.offset.x < -50) setBannerIdx((prev) => (prev + 1) % banners.length);
-                if (info.offset.x > 50) setBannerIdx((prev) => (prev - 1 + banners.length) % banners.length);
-              }}
-              className="absolute inset-0 cursor-grab active:cursor-grabbing"
-              style={{
-                backgroundImage: `url('${banners[bannerIdx]}')`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                backgroundRepeat: "no-repeat",
-              }}
-            />
-          </AnimatePresence>
-          
-          {/* Indicadores */}
-          <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
-            {banners.map((_, i) => (
-              <div
-                key={i}
-                className="h-1 rounded-full transition-all duration-300"
-                style={{
-                  width: i === bannerIdx ? "16px" : "6px",
-                  background: i === bannerIdx ? "#FBBF24" : "rgba(255,255,255,0.4)",
-                }}
-              />
-            ))}
-          </div>
-        </div>
+          style={{
+            backgroundImage: "url('/assets/flyer.webp')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat",
+            borderColor: T.border(d),
+          }}
+        />
       )}{" "}
       {/* fim !isHistorico */}
       {/* Banner histórico */}
