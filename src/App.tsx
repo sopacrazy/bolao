@@ -1059,7 +1059,21 @@ function Login({
       }, 2000);
     } catch (err: any) {
       setError(true);
-      setTimeout(() => setError(false), 3000);
+      if (err.code === "23505") {
+        if (err.message?.includes("apelido")) {
+          setErrorMessage("Este apelido já está em uso.");
+        } else if (err.message?.includes("email")) {
+          setErrorMessage("Este e-mail já está em uso.");
+        } else {
+          setErrorMessage("Usuário ou e-mail já cadastrado.");
+        }
+      } else {
+        setErrorMessage("Erro ao cadastrar. Tente novamente.");
+      }
+      setTimeout(() => {
+        setError(false);
+        setErrorMessage("");
+      }, 4000);
     } finally {
       setLoading(false);
     }
