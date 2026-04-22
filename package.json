@@ -8,9 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "mobile:build": "npm run build && npx cap sync",
+    "mobile:apk": "npm run mobile:build && cd android && gradlew assembleDebug && copy app\\build\\outputs\\apk\\debug\\app-debug.apk ..\\bolao.apk"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/splash-screen": "^8.0.1",
     "@google/genai": "^1.29.0",
     "@supabase/supabase-js": "^2.104.0",
     "@tailwindcss/vite": "^4.1.14",
@@ -25,6 +31,7 @@
     "vite": "^6.2.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",

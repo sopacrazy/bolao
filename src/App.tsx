@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
+import { SplashScreen } from "@capacitor/splash-screen";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1794,14 +1795,32 @@ function Apostar({
     await doShare(sharedFile);
   };
 
-  const setScore = (id: string, side: "home" | "away", val: string) =>
+  const setScore = (id: string, side: "home" | "away", val: string, index: number) => {
+    const cleanVal = val.replace(/\D/g, "").slice(0, 2);
     setScores((s) => ({
       ...s,
       [id]: {
         ...(s[id] ?? { home: "", away: "" }),
-        [side]: val.replace(/\D/g, "").slice(0, 2),
+        [side]: cleanVal,
       },
     }));
+
+    // Pula para o próximo campo automaticamente
+    if (cleanVal.length >= 1) {
+      if (side === "home") {
+        setTimeout(() => {
+          document.getElementById(`score-${id}-away`)?.focus();
+        }, 10);
+      } else {
+        const nextMatch = activeMatches[index + 1];
+        if (nextMatch) {
+          setTimeout(() => {
+            document.getElementById(`score-${nextMatch.id}-home`)?.focus();
+          }, 10);
+        }
+      }
+    }
+  };
 
   const openMatches = activeMatches.filter((m) => m.status !== "STATUS_FINAL");
   const filledCount = openMatches.filter((m) => {
@@ -2108,6 +2127,7 @@ function Apostar({
                 ) : (
                   <>
                     <input
+                      id={`score-${match.id}-home`}
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
@@ -2115,7 +2135,7 @@ function Apostar({
                       placeholder=""
                       disabled={activeIsLocked}
                       onChange={(e) =>
-                        setScore(match.id, "home", e.target.value)
+                        setScore(match.id, "home", e.target.value, idx)
                       }
                       className="w-10 h-10 rounded-xl text-center text-lg font-black outline-none transition-all disabled:opacity-80"
                       style={{
@@ -2135,6 +2155,7 @@ function Apostar({
                       />
                     </div>
                     <input
+                      id={`score-${match.id}-away`}
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
@@ -2142,7 +2163,7 @@ function Apostar({
                       placeholder=""
                       disabled={activeIsLocked}
                       onChange={(e) =>
-                        setScore(match.id, "away", e.target.value)
+                        setScore(match.id, "away", e.target.value, idx)
                       }
                       className="w-10 h-10 rounded-xl text-center text-lg font-black outline-none transition-all disabled:opacity-80"
                       style={{
@@ -3185,16 +3206,22 @@ function ManualMatchesAdmin({
         </div>
         <div className="grid grid-cols-2 gap-2">
           <input
+            id="manual-home-score"
             className={inp()}
             style={inpStyle}
             placeholder="Placar Casa (opcional)"
             type="number"
             value={form.home_score}
-            onChange={(e) =>
-              setForm((f) => ({ ...f, home_score: e.target.value }))
-            }
+            onChange={(e) => {
+              const val = e.target.value;
+              setForm((f) => ({ ...f, home_score: val }));
+              if (val.length >= 1) {
+                setTimeout(() => document.getElementById("manual-away-score")?.focus(), 10);
+              }
+            }}
           />
           <input
+            id="manual-away-score"
             className={inp()}
             style={inpStyle}
             placeholder="Placar Visitante (opcional)"
@@ -3981,6 +4008,8 @@ export default function App() {
       setAuth(true);
       setIsDark(u.dark_mode === true);
     }
+    // Esconde a splash screen nativa assim que o app carregar
+    SplashScreen.hide();
   }, []);
 
   const toggleTheme = async () => {
