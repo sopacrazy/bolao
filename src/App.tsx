@@ -627,7 +627,7 @@ interface StandingEntry {
   points: number;
 }
 
-const STANDINGS_CACHE_KEY = "bolao_standings_v3";
+const STANDINGS_CACHE_KEY = "bolao_standings_v4";
 const STANDINGS_TTL = 30 * 60 * 1000;
 
 function useStandings(league: League = "bra.1") {
@@ -672,27 +672,29 @@ function useStandings(league: League = "bra.1") {
       ),
     ])
       .then((json) => {
-        const findEntries = (o: any, depth = 0): any[] => {
-          if (!o || typeof o !== "object" || depth > 8) return [];
-          if (Array.isArray(o.entries) && o.entries.length > 2 && o.entries[0]?.team)
-            return o.entries;
-          if (Array.isArray(o) && o.length > 2 && o[0]?.team) return o;
-          for (const key of Object.keys(o)) {
-            const val = o[key];
-            if (Array.isArray(val)) {
-              for (const item of val) {
-                const found = findEntries(item, depth + 1);
-                if (found.length) return found;
+        // More precise extraction from ESPN JSON
+        let entries: any[] = [];
+        if (json.standings?.[0]?.entries) {
+          entries = json.standings[0].entries;
+        } else if (json.children?.[0]?.standings?.entries) {
+          entries = json.children[0].standings.entries;
+        } else {
+          // Fallback minimal search
+          const find = (o: any, d = 0): any[] => {
+            if (!o || d > 5) return [];
+            if (Array.isArray(o.entries) && o.entries.length > 2) return o.entries;
+            for (const k of Object.keys(o)) {
+              if (typeof o[k] === "object") {
+                const r = find(o[k], d + 1);
+                if (r.length) return r;
               }
-            } else if (val && typeof val === "object") {
-              const found = findEntries(val, depth + 1);
-              if (found.length) return found;
             }
-          }
-          return [];
-        };
-        const entries: any[] = findEntries(json);
-        if (entries.length === 0) throw new Error("no entries");
+            return [];
+          };
+          entries = find(json);
+        }
+
+        if (!entries.length) throw new Error("no entries");
 
         const getStat = (stats: any[], ...names: string[]) => {
           for (const name of names) {
@@ -704,24 +706,28 @@ function useStandings(league: League = "bra.1") {
           return 0;
         };
 
-        const parsed: StandingEntry[] = entries.map((e: any, i: number) => {
-          const stats: any[] = e.stats ?? [];
-          const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
-          return {
-            pos: i + 1,
-            teamAbbr: e.team?.abbreviation ?? "?",
-            teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? "?",
-            teamLogo: logo,
-            played: getStat(stats, "gamesPlayed", "GP", "P"),
-            wins: getStat(stats, "wins", "W"),
-            draws: getStat(stats, "ties", "draws", "D"),
-            losses: getStat(stats, "losses", "L"),
-            gf: getStat(stats, "pointsFor", "GF", "goalsFor"),
-            ga: getStat(stats, "pointsAgainst", "GA", "goalsAgainst"),
-            gd: getStat(stats, "pointDifferential", "GD", "goalDifferential"),
-            points: getStat(stats, "points", "PTS", "pts"),
-          };
-        });
+        const parsed: StandingEntry[] = entries
+          .map((e: any, i: number) => {
+            const stats: any[] = e.stats ?? [];
+            const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
+            return {
+              pos: i + 1,
+              teamAbbr: e.team?.abbreviation ?? "?",
+              teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? "?",
+              teamLogo: logo,
+              played: getStat(stats, "gamesPlayed", "GP", "P"),
+              wins: getStat(stats, "wins", "W"),
+              draws: getStat(stats, "ties", "draws", "D"),
+              losses: getStat(stats, "losses", "L"),
+              gf: getStat(stats, "pointsFor", "GF", "goalsFor"),
+              ga: getStat(stats, "pointsAgainst", "GA", "goalsAgainst"),
+              gd: getStat(stats, "pointDifferential", "GD", "goalDifferential"),
+              points: getStat(stats, "points", "PTS", "pts"),
+            };
+          })
+          // Filter out possible duplicates by team abbreviation
+          .filter((v, i, a) => a.findIndex(t => t.teamAbbr === v.teamAbbr) === i)
+          .sort((a, b) => a.pos - b.pos);
 
         localStorage.setItem(
           cacheKey,
