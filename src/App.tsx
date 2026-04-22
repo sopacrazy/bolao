@@ -1961,49 +1961,16 @@ function Apostar({
       {/* Progress (só mostra na rodada atual) */}
       {isCurrentRound && (
         <div
-          className="rounded-2xl p-6 flex items-center justify-center border overflow-hidden relative min-h-[160px]"
+          className="rounded-2xl border overflow-hidden relative min-h-[160px]"
           style={{
             background: "#FFFFFF",
-            backgroundImage: "url('/assets/flyer.png')",
+            backgroundImage: "url('/assets/flyer.webp')",
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
             backgroundPosition: "left center",
             borderColor: "rgba(0,0,0,0.08)",
           }}
-        >
-          <div className="relative z-10 ml-auto mr-1">
-            {openMatches.length > 0 && (
-              <div className="relative w-24 h-24 drop-shadow-xl">
-                <svg className="w-24 h-24 -rotate-90" viewBox="0 0 44 44">
-                  <circle
-                    cx="22"
-                    cy="22"
-                    r="18"
-                    fill="rgba(0,0,0,0.03)"
-                    stroke="rgba(0,0,0,0.05)"
-                    strokeWidth="4"
-                  />
-                  <circle
-                    cx="22"
-                    cy="22"
-                    r="18"
-                    fill="none"
-                    stroke="#39FF14"
-                    strokeWidth="4"
-                    strokeDasharray={`${(filledCount / openMatches.length) * 113} 113`}
-                    strokeLinecap="round"
-                    style={{ filter: "drop-shadow(0 0 8px rgba(57,255,20,0.6))" }}
-                  />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="font-black text-xl text-slate-800">
-                    {Math.round((filledCount / (openMatches.length || 1)) * 100)}%
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        />
       )}{" "}
       {/* fim !isHistorico */}
       {/* Banner histórico */}
