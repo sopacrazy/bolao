@@ -4290,7 +4290,16 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
       });
       
       if (res.status === 401) {
-        setError("Chave Inválida ou Sem Permissão. O Supabase rejeitou o token. Tente gerar um NOVO 'Access Token' no painel e colar abaixo.");
+        // Tenta listar os projetos para ver se o token é válido e qual o ID correto
+        const listRes = await fetch(`/supabase-api/v1/projects`, {
+          headers: { Authorization: `Bearer ${currentToken}` }
+        });
+        if (listRes.ok) {
+          const projects = await listRes.json();
+          setError(`Token Válido, mas o Projeto não foi encontrado. Seus projetos disponíveis: ${projects.map((p:any) => p.id).join(", ")}`);
+        } else {
+          setError("Token Inválido ou Sem Permissão. Gere um novo token no painel do Supabase.");
+        }
         setData(null);
         return;
       }
