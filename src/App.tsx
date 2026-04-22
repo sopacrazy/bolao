@@ -636,7 +636,10 @@ function useStandings(league: League = "bra.1") {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    setData(null);
+    setError(false);
     setLoading(true);
+    
     const cacheKey = `${STANDINGS_CACHE_KEY}_${league}`;
     try {
       const raw = localStorage.getItem(cacheKey);
@@ -655,88 +658,87 @@ function useStandings(league: League = "bra.1") {
         if (!r.ok) throw new Error(r.status.toString());
         return r.json();
       });
+    
     const yr = new Date().getFullYear();
+    const urls = [
+      `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr}&seasontype=2`,
+      `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr - 1}&seasontype=2`,
+      `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/standings`,
+    ];
 
-    Promise.any([
-      tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr}&seasontype=2`,
-      ),
-      tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr + 1}&seasontype=2`,
-      ),
-      tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/${league}/standings?season=${yr}`,
-      ),
-      tryFetch(
-        `https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/standings`,
-      ),
-    ])
-      .then((json) => {
-        // More precise extraction from ESPN JSON
-        let entries: any[] = [];
-        if (json.standings?.[0]?.entries) {
-          entries = json.standings[0].entries;
-        } else if (json.children?.[0]?.standings?.entries) {
-          entries = json.children[0].standings.entries;
-        } else {
-          // Fallback minimal search
-          const find = (o: any, d = 0): any[] => {
-            if (!o || d > 5) return [];
-            if (Array.isArray(o.entries) && o.entries.length > 2) return o.entries;
-            for (const k of Object.keys(o)) {
-              if (typeof o[k] === "object") {
-                const r = find(o[k], d + 1);
-                if (r.length) return r;
+    (async () => {
+      let success = false;
+      for (const url of urls) {
+        try {
+          const json = await tryFetch(url);
+          let entries: any[] = [];
+          
+          if (json.standings?.[0]?.entries) {
+            entries = json.standings[0].entries;
+          } else if (json.children?.[0]?.standings?.entries) {
+            entries = json.children[0].standings.entries;
+          } else {
+            const find = (o: any, d = 0): any[] => {
+              if (!o || d > 5) return [];
+              if (Array.isArray(o.entries) && o.entries.length > 2) return o.entries;
+              for (const k of Object.keys(o)) {
+                if (typeof o[k] === "object") {
+                  const r = find(o[k], d + 1);
+                  if (r.length) return r;
+                }
               }
-            }
-            return [];
-          };
-          entries = find(json);
-        }
-
-        if (!entries.length) throw new Error("no entries");
-
-        const getStat = (stats: any[], ...names: string[]) => {
-          for (const name of names) {
-            const s = stats.find(
-              (x: any) => x.name === name || x.abbreviation === name,
-            );
-            if (s != null) return parseFloat(s.value) || 0;
-          }
-          return 0;
-        };
-
-        const parsed: StandingEntry[] = entries
-          .map((e: any, i: number) => {
-            const stats: any[] = e.stats ?? [];
-            const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
-            return {
-              pos: i + 1,
-              teamAbbr: e.team?.abbreviation ?? "?",
-              teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? "?",
-              teamLogo: logo,
-              played: getStat(stats, "gamesPlayed", "GP", "P"),
-              wins: getStat(stats, "wins", "W"),
-              draws: getStat(stats, "ties", "draws", "D"),
-              losses: getStat(stats, "losses", "L"),
-              gf: getStat(stats, "pointsFor", "GF", "goalsFor"),
-              ga: getStat(stats, "pointsAgainst", "GA", "goalsAgainst"),
-              gd: getStat(stats, "pointDifferential", "GD", "goalDifferential"),
-              points: getStat(stats, "points", "PTS", "pts"),
+              return [];
             };
-          })
-          // Filter out possible duplicates by team abbreviation
-          .filter((v, i, a) => a.findIndex(t => t.teamAbbr === v.teamAbbr) === i)
-          .sort((a, b) => a.pos - b.pos);
+            entries = find(json);
+          }
 
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify({ payload: parsed, ts: Date.now() }),
-        );
-        setData(parsed);
-      })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
+          if (entries.length > 0) {
+            const getStat = (stats: any[], ...names: string[]) => {
+              for (const name of names) {
+                const s = stats.find(
+                  (x: any) => x.name === name || x.abbreviation === name,
+                );
+                if (s != null) return parseFloat(s.value) || 0;
+              }
+              return 0;
+            };
+
+            const parsed: StandingEntry[] = entries
+              .map((e: any, i: number) => {
+                const stats: any[] = e.stats ?? [];
+                const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
+                return {
+                  pos: i + 1,
+                  teamAbbr: e.team?.abbreviation ?? "?",
+                  teamName: e.team?.shortDisplayName ?? e.team?.displayName ?? "?",
+                  teamLogo: logo,
+                  played: getStat(stats, "gamesPlayed", "GP", "P"),
+                  wins: getStat(stats, "wins", "W"),
+                  draws: getStat(stats, "ties", "draws", "D"),
+                  losses: getStat(stats, "losses", "L"),
+                  gf: getStat(stats, "pointsFor", "GF", "goalsFor"),
+                  ga: getStat(stats, "pointsAgainst", "GA", "goalsAgainst"),
+                  gd: getStat(stats, "pointDifferential", "GD", "goalDifferential"),
+                  points: getStat(stats, "points", "PTS", "pts"),
+                };
+              })
+              .filter((v, i, a) => a.findIndex(t => t.teamAbbr === v.teamAbbr) === i)
+              .sort((a, b) => a.pos - b.pos);
+
+            if (parsed.length > 0) {
+              localStorage.setItem(cacheKey, JSON.stringify({ payload: parsed, ts: Date.now() }));
+              setData(parsed);
+              success = true;
+              break; 
+            }
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      if (!success) setError(true);
+      setLoading(false);
+    })();
   }, [league]);
 
   return { data, loading, error };
@@ -828,9 +830,9 @@ function StandingsModal({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            {loading && (
-              <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="flex-1 overflow-y-auto px-4 py-4 min-h-[300px]">
+            {loading && !data && (
+              <div className="flex flex-col items-center justify-center py-24 gap-3">
                 <motion.div
                   className="w-9 h-9 rounded-full border-2 border-amber-400/20 border-t-amber-400"
                   animate={{ rotate: 360 }}
@@ -841,20 +843,30 @@ function StandingsModal({
                   }}
                 />
                 <p className="text-xs" style={{ color: T.textMuted(d) }}>
-                  Carregando classificação...
+                  Buscando classificação...
                 </p>
               </div>
             )}
 
-            {error && (
-              <div className="text-center py-12 space-y-2">
-                <WifiOff size={28} className="mx-auto text-slate-400" />
-                <p
-                  className="text-sm font-medium"
-                  style={{ color: T.textMuted(d) }}
+            {error && !data && (
+              <div className="text-center py-24 space-y-3">
+                <div className="w-16 h-16 rounded-full bg-slate-500/5 flex items-center justify-center mx-auto">
+                  <WifiOff size={32} className="text-slate-400" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-bold" style={{ color: T.text(d) }}>
+                    Classificação indisponível
+                  </p>
+                  <p className="text-xs px-8" style={{ color: T.textMuted(d) }}>
+                    Não conseguimos carregar os dados da {lg === "bra.1" ? "Série A" : "Série C"} no momento.
+                  </p>
+                </div>
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="mt-4 px-6 py-2 rounded-xl text-xs font-bold bg-amber-400 text-slate-900"
                 >
-                  Classificação indisponível
-                </p>
+                  Tentar novamente
+                </button>
               </div>
             )}
 
