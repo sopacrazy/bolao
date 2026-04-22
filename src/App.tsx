@@ -160,14 +160,24 @@ function filterNextRound(events: any[], onlyFirst: boolean): { events: any[]; ro
   const sortedKeys = [...groups.keys()].sort((a, b) => a - b);
 
   // Encontra o primeiro grupo com ao menos 1 jogo não finalizado
-  const isFinal = (ev: any) => {
-    const st = ev.status?.type?.name ?? "";
-    return st === "STATUS_FINAL" || st === "STATUS_CANCELED" || st === "STATUS_POSTPONED";
-  };
-
   for (const key of sortedKeys) {
     const evs = groups.get(key)!;
-    if (evs.some((ev) => !isFinal(ev))) {
+    const allFinished = evs.every((ev) => {
+      const st = ev.status?.type?.name ?? "";
+      return st === "STATUS_FINAL" || st === "STATUS_CANCELED";
+    });
+
+    if (!allFinished) {
+      const rn = eventRound(evs[0]) ?? key;
+      return { events: evs, roundNumber: rn };
+    }
+
+    // Se todos terminados, verifica se o último terminou há menos de 24h
+    const latestTs = Math.max(
+      ...evs.map((ev) => new Date(ev.date ?? 0).getTime()),
+    );
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    if (Date.now() - latestTs < ONE_DAY) {
       const rn = eventRound(evs[0]) ?? key;
       return { events: evs, roundNumber: rn };
     }
@@ -1031,7 +1041,17 @@ function Login({
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
+
   const d = isDark;
+
+  useEffect(() => {
+    const remembered = localStorage.getItem("bolao_remembered_user");
+    if (remembered) {
+      setUser(remembered);
+    }
+  }, []);
+
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1099,7 +1119,14 @@ function Login({
         return;
       }
 
+      if (rememberMe) {
+        localStorage.setItem("bolao_remembered_user", user);
+      } else {
+        localStorage.removeItem("bolao_remembered_user");
+      }
+
       localStorage.setItem("bolao_user", JSON.stringify(data));
+
       onLogin();
     } catch (err) {
       setError(true);
@@ -1352,8 +1379,25 @@ function Login({
                     }}
                   />
                 </div>
+                <div className="flex items-center gap-2 px-1">
+                  <input
+                    type="checkbox"
+                    id="remember"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-gray-300 text-amber-400 focus:ring-amber-400 accent-amber-400"
+                  />
+                  <label
+                    htmlFor="remember"
+                    className="text-xs font-medium cursor-pointer select-none"
+                    style={{ color: T.textMuted(d) }}
+                  >
+                    Lembrar meu usuário
+                  </label>
+                </div>
               </>
             )}
+
           </div>
 
           <AnimatePresence>
@@ -1498,6 +1542,16 @@ function Apostar({
   const [sharedFile, setSharedFile] = useState<File | null>(null);
   const [sharingPending, setSharingPending] = useState(false);
   const shareRef = React.useRef<HTMLDivElement>(null);
+
+  const banners = ["/assets/flyer.webp", "/assets/flyer2.png"];
+  const [bannerIdx, setBannerIdx] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setBannerIdx((prev) => (prev + 1) % banners.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (espn.data?.roundNumber) onRoundLoad(espn.data.roundNumber);
@@ -1958,19 +2012,50 @@ function Apostar({
           <ChevronRight size={16} style={{ color: T.text(d) }} />
         </button>
       </div>
-      {/* Progress (só mostra na rodada atual) */}
+
+      {/* Banner Carousel */}
       {isCurrentRound && (
         <div
-          className="rounded-2xl border overflow-hidden relative min-h-[160px]"
-          style={{
-            background: "#FFFFFF",
-            backgroundImage: "url('/assets/flyer.webp')",
-            backgroundSize: "contain",
-            backgroundRepeat: "no-repeat",
-            backgroundPosition: "left center",
-            borderColor: "rgba(0,0,0,0.08)",
-          }}
-        />
+          className="relative h-44 rounded-2xl overflow-hidden border shadow-sm"
+          style={{ borderColor: T.border(d) }}
+        >
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={bannerIdx}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.5, ease: "easeInOut" }}
+              drag="x"
+              dragConstraints={{ left: 0, right: 0 }}
+              onDragEnd={(_, info) => {
+                if (info.offset.x < -50) setBannerIdx((prev) => (prev + 1) % banners.length);
+                if (info.offset.x > 50) setBannerIdx((prev) => (prev - 1 + banners.length) % banners.length);
+              }}
+              className="absolute inset-0 cursor-grab active:cursor-grabbing"
+              style={{
+                backgroundImage: `url('${banners[bannerIdx]}')`,
+                backgroundSize: "cover",
+                backgroundPosition: "center",
+                backgroundRepeat: "no-repeat",
+              }}
+            />
+          </AnimatePresence>
+          
+          {/* Indicadores */}
+          <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none">
+            {banners.map((_, i) => (
+              <div
+                key={i}
+                className="h-1 rounded-full transition-all duration-300"
+                style={{
+                  width: i === bannerIdx ? "16px" : "6px",
+                  background: i === bannerIdx ? "#FBBF24" : "rgba(255,255,255,0.4)",
+                }}
+              />
+            ))}
+          </div>
+        </div>
       )}{" "}
       {/* fim !isHistorico */}
       {/* Banner histórico */}

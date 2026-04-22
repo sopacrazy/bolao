@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(npm run *)",
+      "Bash(git checkout *)",
+      "Bash(npm i *)",
+      "Bash(git push *)",
+      "Bash(node -e \"const s = require\\('fs'\\).readFileSync\\('src/App.tsx','utf8'\\); const line = s.split\\('\\\\n'\\)[539]; console.log\\(JSON.stringify\\(line\\)\\);\")",
+      "Bash(node -e ' *)"
+    ]
+  }
+}
