@@ -28,7 +28,7 @@ import {
   X,
   List,
 } from "lucide-react";
-import { supabase, supabaseKey } from "./lib/supabase";
+import { supabase, supabaseKey, supabaseAdminToken } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -4270,9 +4270,9 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
   const fetchUsage = async () => {
     let currentToken = token;
     
-    // Tenta pegar do localStorage primeiro, se não tiver, tenta a chave do projeto (pode falhar se for anon)
+    // Prioridade: Token Admin (sbp_) -> LocalStorage -> Chave do Projeto
     if (!currentToken) {
-      currentToken = supabaseKey || "";
+      currentToken = supabaseAdminToken || localStorage.getItem("sb_mgmt_token") || supabaseKey || "";
     }
 
     if (!currentToken) {
