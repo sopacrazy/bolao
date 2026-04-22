@@ -4268,14 +4268,10 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchUsage = async () => {
-    let currentToken = token;
+    // Prioridade: Token do Arquivo (sbp_) -> State -> LocalStorage
+    let currentToken = supabaseAdminToken || token || localStorage.getItem("sb_mgmt_token") || "";
     
-    // Prioridade Máxima: Token Admin do arquivo (sbp_)
-    if (supabaseAdminToken) {
-      currentToken = supabaseAdminToken;
-    } else if (!currentToken) {
-      currentToken = localStorage.getItem("sb_mgmt_token") || supabaseKey || "";
-    }
+    if (currentToken) currentToken = currentToken.trim();
 
     if (!currentToken) {
       setError("Token não configurado.");
@@ -4285,13 +4281,13 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      // Usando proxy para evitar erro de CORS no navegador
-      const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(`https://api.supabase.com/v1/projects/${projectRef}/usage`);
+      // Mudando para o proxy AllOrigins que é bem estável
+      const targetUrl = `https://api.supabase.com/v1/projects/${projectRef}/usage`;
+      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
       
       const res = await fetch(proxyUrl, {
         headers: { 
-          Authorization: `Bearer ${currentToken}`,
-          "Content-Type": "application/json"
+          Authorization: `Bearer ${currentToken}`
         }
       });
       
