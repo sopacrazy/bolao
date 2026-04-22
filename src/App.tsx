@@ -101,33 +101,84 @@ function parseMatches(events: any[]): Match[] {
   });
 }
 
-// Tenta extrair número da rodada das notas do evento (ex: "Matchday 5")
-function extractRound(events: any[]): number | string {
-  for (const ev of events) {
-    const notes: any[] = ev.competitions?.[0]?.notes ?? [];
-    for (const n of notes) {
-      const m = String(n.headline ?? n.value ?? "").match(/\d+/);
-      if (m) return parseInt(m[0]);
-    }
-    const rn = ev.competitions?.[0]?.series?.roundNumber;
-    if (rn) return rn;
+// Extrai número da rodada de um único evento ESPN
+function eventRound(ev: any): number | null {
+  const notes: any[] = ev.competitions?.[0]?.notes ?? [];
+  for (const n of notes) {
+    const m = String(n.headline ?? n.value ?? "").match(/\d+/);
+    if (m) return parseInt(m[0]);
   }
-  return "?";
+  const rn = ev.competitions?.[0]?.series?.roundNumber;
+  if (rn) return Number(rn);
+  return null;
+}
+
+// Dado um array de eventos ESPN, retorna somente os da próxima rodada ativa.
+// "Próxima rodada ativa" = menor rodada com ao menos 1 jogo não finalizado.
+// Se TODOS os jogos estão finalizados, aguarda 24h antes de liberar nova rodada.
+// Para histórico (onlyFirst=false), retorna todos sem filtrar por rodada.
+function filterNextRound(events: any[], onlyFirst: boolean): { events: any[]; roundNumber: number | string } {
+  if (!events.length) return { events: [], roundNumber: "?" };
+
+  if (!onlyFirst) {
+    // Modo histórico: retorna tudo, usa rodada do primeiro evento
+    const rn = eventRound(events[0]) ?? "?";
+    return { events, roundNumber: rn };
+  }
+
+  // Agrupa por número de rodada
+  const groups = new Map<number, any[]>();
+  const fallback: any[] = []; // eventos sem número de rodada detectável
+  for (const ev of events) {
+    const rn = eventRound(ev);
+    if (rn !== null) {
+      if (!groups.has(rn)) groups.set(rn, []);
+      groups.get(rn)!.push(ev);
+    } else {
+      fallback.push(ev);
+    }
+  }
+
+  // Se não conseguiu distinguir rodadas, cai no comportamento antigo
+  if (groups.size === 0) return { events: fallback, roundNumber: "?" };
+
+  const sortedRounds = [...groups.keys()].sort((a, b) => a - b);
+
+  // Encontra a menor rodada com ao menos 1 jogo não finalizado
+  for (const rn of sortedRounds) {
+    const evs = groups.get(rn)!;
+    const hasOpen = evs.some((ev) => {
+      const st = ev.status?.type?.name ?? "";
+      return st !== "STATUS_FINAL" && st !== "STATUS_CANCELED" && st !== "STATUS_POSTPONED";
+    });
+    if (hasOpen) return { events: evs, roundNumber: rn };
+  }
+
+  // Todas as rodadas encerradas — regra de 24h de espera
+  const lastRound = sortedRounds[sortedRounds.length - 1];
+  const lastEvs = groups.get(lastRound)!;
+  const latestTs = Math.max(...lastEvs.map((ev) => new Date(ev.date ?? 0).getTime()));
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  if (Date.now() - latestTs < ONE_DAY) {
+    // Dentro do período de espera: mostra a rodada encerrada (sem novos jogos)
+    return { events: lastEvs, roundNumber: lastRound };
+  }
+
+  // Passou 1 dia: não há rodada para exibir ainda (espera o admin liberar nova)
+  return { events: [], roundNumber: "?" };
 }
 
 async function espnDateRange(
   start: Date,
   end: Date,
   lg: League = "bra.1",
+  onlyNextRound = false,
 ): Promise<RodadaData> {
   const res = await fetch(`${espnBase(lg)}?dates=${ymd(start)}-${ymd(end)}`);
   if (!res.ok) throw new Error();
   const json = await res.json();
-  const roundNumber =
-    json.week?.number ??
-    json.leagues?.[0]?.season?.type?.week?.number ??
-    extractRound(json.events ?? []);
-  return { matches: parseMatches(json.events ?? []), roundNumber };
+  const { events, roundNumber } = filterNextRound(json.events ?? [], onlyNextRound);
+  return { matches: parseMatches(events), roundNumber };
 }
 
 function todayMidnight() {
@@ -167,24 +218,16 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
       let result: RodadaData;
 
       if (isCurrent) {
-        // Janela atual: de hoje até +14 dias
-        const future = new Date(anchor.getTime() + 14 * 86400000);
-        result = await espnDateRange(anchor, future, league);
+        // Janela atual: de hoje até +30 dias (cobre até 2 rodadas, mas filtramos pela próxima)
+        const future = new Date(anchor.getTime() + 30 * 86400000);
+        result = await espnDateRange(anchor, future, league, true);
 
         // Fallback ao endpoint padrão (pode ter jogo ao vivo)
         if (result.matches.length === 0) {
           const res = await fetch(espnBase(league));
           const json = await res.json();
-          result = {
-            matches: parseMatches(json.events ?? []),
-            roundNumber: json.week?.number ?? extractRound(json.events ?? []),
-          };
-        }
-
-        // Tenta estender para 30 dias
-        if (result.matches.length === 0) {
-          const far = new Date(anchor.getTime() + 30 * 86400000);
-          result = await espnDateRange(anchor, far, league);
+          const { events, roundNumber } = filterNextRound(json.events ?? [], true);
+          result = { matches: parseMatches(events), roundNumber };
         }
       } else {
         // Histórico: janela de 8 dias centrada no anchor
