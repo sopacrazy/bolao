@@ -19,13 +19,6 @@ export default defineConfig(({mode}) => {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      proxy: {
-        '/supabase-api': {
-          target: 'https://api.supabase.com',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/supabase-api/, ''),
-        }
-      }
     },
   };
 });
