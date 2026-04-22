@@ -28,7 +28,7 @@ import {
   X,
   List,
 } from "lucide-react";
-import { supabase } from "./lib/supabase";
+import { supabase, supabaseKey } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -4268,17 +4268,38 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
   const [error, setError] = useState<string | null>(null);
 
   const fetchUsage = async () => {
-    if (!token) return;
+    let currentToken = token;
+    
+    // Tenta pegar do localStorage primeiro, se não tiver, tenta a chave do projeto (pode falhar se for anon)
+    if (!currentToken) {
+      currentToken = supabaseKey || "";
+    }
+
+    if (!currentToken) {
+      setError("Token não configurado.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/usage`, {
-        headers: { Authorization: `Bearer ${token}` }
+      // Usando proxy para evitar erro de CORS no navegador
+      const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(`https://api.supabase.com/v1/projects/${projectRef}/usage`);
+      
+      const res = await fetch(proxyUrl, {
+        headers: { 
+          Authorization: `Bearer ${currentToken}`,
+          "Content-Type": "application/json"
+        }
       });
-      if (!res.ok) throw new Error("Token inválido ou erro na API");
+      
+      if (res.status === 401) throw new Error("Chave Inválida. A chave do seu arquivo supabase.ts é pública e não tem permissão de monitoramento. Você precisa de um 'Access Token' (Management Token) do painel do Supabase.");
+      if (!res.ok) throw new Error("Erro ao consultar API: " + res.status);
+      
       const json = await res.json();
       setData(json);
-      localStorage.setItem("sb_mgmt_token", token);
+      localStorage.setItem("sb_mgmt_token", currentToken);
+      setToken(currentToken);
     } catch (err: any) {
       setError(err.message);
     } finally {
