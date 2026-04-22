@@ -4281,13 +4281,11 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
     setLoading(true);
     setError(null);
     try {
-      // Mudando para o proxy AllOrigins que é bem estável
-      const targetUrl = `https://api.supabase.com/v1/projects/${projectRef}/usage`;
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-      
-      const res = await fetch(proxyUrl, {
+      // Usando o proxy interno do Vite configurado em vite.config.ts
+      const res = await fetch(`/supabase-api/v1/projects/${projectRef}/usage`, {
         headers: { 
-          Authorization: `Bearer ${currentToken}`
+          Authorization: `Bearer ${currentToken}`,
+          "Content-Type": "application/json"
         }
       });
       
