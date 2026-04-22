@@ -4289,16 +4289,21 @@ function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
         }
       });
       
-      if (res.status === 401) {
+      if (res.status === 401 || res.status === 404) {
         // Tenta listar os projetos para ver se o token é válido e qual o ID correto
         const listRes = await fetch(`/supabase-api/v1/projects`, {
           headers: { Authorization: `Bearer ${currentToken}` }
         });
         if (listRes.ok) {
           const projects = await listRes.json();
-          setError(`Token Válido, mas o Projeto não foi encontrado. Seus projetos disponíveis: ${projects.map((p:any) => p.id).join(", ")}`);
+          const ids = projects.map((p:any) => p.id).join(", ");
+          if (res.status === 404) {
+            setError(`Projeto não encontrado. Seus IDs de projeto disponíveis são: ${ids}. Verifique se o ID no código coincide.`);
+          } else {
+            setError(`Token Válido, mas sem acesso ao projeto. IDs disponíveis: ${ids}`);
+          }
         } else {
-          setError("Token Inválido ou Sem Permissão. Gere um novo token no painel do Supabase.");
+          setError(res.status === 401 ? "Token Inválido." : "Projeto não encontrado (404).");
         }
         setData(null);
         return;
