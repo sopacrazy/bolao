@@ -46,6 +46,7 @@ interface Match {
   date: string;
   status: string;
   clock: string;
+  league?: "bra.1" | "bra.3";
 }
 
 interface RodadaData {
@@ -263,7 +264,7 @@ function useSerieCRodada(showPast: boolean) {
   const load = async (force = false) => {
     setLoading(true);
     setError(false);
-    const cacheKey = `${TSDB_CACHE}_${showPast ? "past" : "next"}`;
+    const cacheKey = `${TSDB_CACHE}_${showPast ? "past" : "next"}_v2`;
 
     if (!force) {
       try {
@@ -284,10 +285,27 @@ function useSerieCRodada(showPast: boolean) {
       const res = await fetch(`${TSDB_BASE}/${endpoint}.php?id=${TSDB_LEAGUE}`);
       if (!res.ok) throw new Error();
       const json = await res.json();
-      const events: any[] = json.events ?? [];
-      const matches = parseTsdbEvents(events);
-      // TheSportsDB returns mixed rounds — group by the first round found
-      const roundNumber = events[0]?.intRound ?? "?";
+      const peekEvents: any[] = json.events ?? [];
+      if (!peekEvents.length) {
+        setData({ matches: [], roundNumber: "?" });
+        setLoading(false);
+        return;
+      }
+
+      // eventsnextleague returns only 5 events across multiple rounds.
+      // Fetch the full round using eventsround.php once we know the round #.
+      const roundNumber: string | number = peekEvents[0]?.intRound ?? "?";
+      const season = new Date().getFullYear();
+      const roundRes = await fetch(
+        `${TSDB_BASE}/eventsround.php?id=${TSDB_LEAGUE}&r=${roundNumber}&s=${season}`,
+      );
+      let allEvents = peekEvents;
+      if (roundRes.ok) {
+        const roundJson = await roundRes.json();
+        if (roundJson.events?.length) allEvents = roundJson.events;
+      }
+
+      const matches = parseTsdbEvents(allEvents);
       const result: RodadaData = { matches, roundNumber };
       localStorage.setItem(
         cacheKey,
@@ -567,50 +585,46 @@ function useStandings() {
       });
     const yr = new Date().getFullYear();
 
-    // Tenta múltiplos endpoints ESPN com ano dinâmico
+    // Tenta múltiplos endpoints ESPN (2025 e 2026 pois ESPN rotula a temporada corrente como próximo ano)
     Promise.any([
       tryFetch(
         `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}&seasontype=2`,
       ),
       tryFetch(
-        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}`,
+        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr + 1}&seasontype=2`,
       ),
       tryFetch(
-        `https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/standings?season=${yr}&seasontype=2`,
+        `https://site.api.espn.com/apis/v2/sports/soccer/bra.1/standings?season=${yr}`,
       ),
       tryFetch(
         `https://site.api.espn.com/apis/site/v2/sports/soccer/bra.1/standings`,
       ),
     ])
       .then((json) => {
-        console.log(
-          "[Bolão] Standings raw:",
-          JSON.stringify(json).substring(0, 300),
-        );
         // ESPN pode retornar entries direto ou dentro de standings/children/groups/season
         const findEntries = (o: any, depth = 0): any[] => {
-          if (!o || typeof o !== "object" || depth > 6) return [];
-          if (Array.isArray(o.entries) && o.entries.length > 5)
+          if (!o || typeof o !== "object" || depth > 8) return [];
+          // Direct entries array with team objects
+          if (Array.isArray(o.entries) && o.entries.length > 2 && o.entries[0]?.team)
             return o.entries;
-          if (Array.isArray(o) && o.length > 5 && o[0]?.team) return o;
+          // Array of team objects directly
+          if (Array.isArray(o) && o.length > 2 && o[0]?.team) return o;
+          // Recurse into all keys: arrays → iterate elements, objects → recurse
           for (const key of Object.keys(o)) {
-            if (Array.isArray(o[key])) continue; // skip arrays at top (not entries)
-            const found = findEntries(o[key], depth + 1);
-            if (found.length) return found;
-          }
-          // also try arrays
-          for (const key of Object.keys(o)) {
-            if (!Array.isArray(o[key])) continue;
-            if (o[key].length > 5 && o[key][0]?.team) return o[key];
+            const val = o[key];
+            if (Array.isArray(val)) {
+              for (const item of val) {
+                const found = findEntries(item, depth + 1);
+                if (found.length) return found;
+              }
+            } else if (val && typeof val === "object") {
+              const found = findEntries(val, depth + 1);
+              if (found.length) return found;
+            }
           }
           return [];
         };
         const entries: any[] = findEntries(json);
-        console.log(
-          "[Bolão] Standings entries found:",
-          entries.length,
-          entries[0],
-        );
         if (entries.length === 0) throw new Error("no entries");
 
         const getStat = (stats: any[], ...names: string[]) => {
@@ -1400,19 +1414,17 @@ function Apostar({
 }) {
   const d = isDark;
   const [loadingBets, setLoadingBets] = useState(false);
-  const [league, setLeague] = useState<League>("bra.1");
 
   const [anchorTs, setAnchorTs] = useState(() => todayMidnight());
-  const [showPast, setShowPast] = useState(false);
-  const isSerieC = league === "bra.3";
-  const espn = useRodada(anchorTs, league);
-  const seriec = useSerieCRodada(showPast);
-  const { data, loading, error, refetch } = isSerieC ? seriec : espn;
+  const espn = useRodada(anchorTs, "bra.1");
+  const seriec = useSerieCRodada(false);
 
-  // Para Série C: "rodada atual" = próximos jogos (não passados)
-  const isCurrentRound = isSerieC
-    ? !showPast
-    : anchorTs >= todayMidnight() - 86400000;
+  const loading = espn.loading || seriec.loading;
+  const error = espn.error && seriec.error;
+  const refetch = () => { espn.refetch(); seriec.refetch(); };
+
+  const isCurrentRound = anchorTs >= todayMidnight() - 86400000;
+
   const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
   const [liberatedLoading, setLiberatedLoading] = useState(true);
   type ScoreMap = Record<string, { home: string; away: string }>;
@@ -1424,33 +1436,24 @@ function Apostar({
   const [sharingPending, setSharingPending] = useState(false);
   const shareRef = React.useRef<HTMLDivElement>(null);
 
-  // Reset ao trocar de liga
   useEffect(() => {
-    setAnchorTs(todayMidnight());
-    setShowPast(false);
-    setScores({});
-    setIsLocked(false);
-  }, [league]);
-
-  useEffect(() => {
-    if (data?.roundNumber) onRoundLoad(data.roundNumber);
+    if (espn.data?.roundNumber) onRoundLoad(espn.data.roundNumber);
     fetchLiberated();
-  }, [data?.roundNumber, anchorTs, league]);
+  }, [espn.data?.roundNumber, anchorTs]);
 
   const fetchLiberated = async () => {
     setLiberatedLoading(true);
     const { data: libData } = await supabase
       .from("jogos_selecionados")
       .select("match_id")
-      .eq("liberado", true)
-      .eq("league", league);
-    if (libData) setLiberatedIds(libData.map((x) => x.match_id));
+      .eq("liberado", true);
+    if (libData) setLiberatedIds(libData.map((x: any) => x.match_id));
     setLiberatedLoading(false);
   };
 
   useEffect(() => {
-    if (data?.matches) fetchUserBets();
-  }, [data?.matches, anchorTs]);
+    if (espn.data?.matches || seriec.data?.matches) fetchUserBets();
+  }, [espn.data?.matches, seriec.data?.matches, anchorTs]);
 
   const fetchUserBets = async () => {
     if (!user) return;
@@ -1458,12 +1461,11 @@ function Apostar({
     const { data: bets } = await supabase
       .from("palpites")
       .select("*")
-      .eq("usuario_id", user.id)
-      .eq("league", league);
+      .eq("usuario_id", user.id);
 
     if (bets && bets.length > 0) {
       const betMap: ScoreMap = {};
-      bets.forEach((b) => {
+      bets.forEach((b: any) => {
         betMap[b.match_id] = {
           home: String(b.gols_home),
           away: String(b.gols_away),
@@ -1472,7 +1474,6 @@ function Apostar({
       setScores(betMap);
       setIsLocked(true);
     } else {
-      // Palpites apagados do banco — libera o formulário novamente
       setScores({});
       setIsLocked(false);
     }
@@ -1480,9 +1481,9 @@ function Apostar({
   };
 
   const goBack = () => {
-    // Ancora 10 dias antes do primeiro jogo da janela atual
-    const earliest = data?.matches.length
-      ? data.matches.reduce(
+    const espnMatches = espn.data?.matches ?? [];
+    const earliest = espnMatches.length
+      ? espnMatches.reduce(
           (m, x) => Math.min(m, new Date(x.date).getTime()),
           Infinity,
         )
@@ -1494,20 +1495,23 @@ function Apostar({
 
   const goForward = () => {
     if (isCurrentRound) return;
-    // Ancora 3 dias após o último jogo da janela atual
-    const latest = data?.matches.length
-      ? data.matches.reduce(
+    const espnMatches = espn.data?.matches ?? [];
+    const latest = espnMatches.length
+      ? espnMatches.reduce(
           (m, x) => Math.max(m, new Date(x.date).getTime()),
           -Infinity,
         )
       : anchorTs;
     const next = new Date(latest + 3 * 86400000);
     next.setHours(0, 0, 0, 0);
-    // não passa de hoje
     setAnchorTs(Math.min(next.getTime(), todayMidnight()));
   };
 
-  const matches = (data?.matches ?? []).filter(
+  const rawMatches: Match[] = [
+    ...(espn.data?.matches ?? []).map((m) => ({ ...m, league: "bra.1" as const })),
+    ...(isCurrentRound ? (seriec.data?.matches ?? []).map((m) => ({ ...m, league: "bra.3" as const })) : []),
+  ];
+  const matches = rawMatches.filter(
     (m) => liberatedIds.includes(m.id) || !isCurrentRound,
   );
 
@@ -1778,75 +1782,77 @@ function Apostar({
   // ── Error state ──
   if (error)
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-5">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{
-            background: "rgba(248,113,113,0.1)",
-            border: "1px solid rgba(248,113,113,0.2)",
-          }}
-        >
-          <WifiOff size={28} className="text-red-400" />
+      <div className="pb-4 space-y-4">
+        <div className="flex flex-col items-center justify-center py-16 gap-5">
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{
+              background: "rgba(248,113,113,0.1)",
+              border: "1px solid rgba(248,113,113,0.2)",
+            }}
+          >
+            <WifiOff size={28} className="text-red-400" />
+          </div>
+          <div className="text-center">
+            <p className="font-bold text-base" style={{ color: T.text(d) }}>
+              Sem conexão com a API
+            </p>
+            <p className="text-sm mt-1" style={{ color: T.textMuted(d) }}>
+              Não foi possível carregar os jogos
+            </p>
+          </div>
+          <button
+            onClick={refetch}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+            style={{
+              background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)",
+              color: "#0C1120",
+            }}
+          >
+            <RefreshCw size={15} /> Tentar novamente
+          </button>
         </div>
-        <div className="text-center">
-          <p className="font-bold text-base" style={{ color: T.text(d) }}>
-            Sem conexão com a API
-          </p>
-          <p className="text-sm mt-1" style={{ color: T.textMuted(d) }}>
-            Não foi possível carregar os jogos
-          </p>
-        </div>
-        <button
-          onClick={refetch}
-          className="flex items-center gap-2 px-5 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
-          style={{
-            background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)",
-            color: "#0C1120",
-          }}
-        >
-          <RefreshCw size={15} /> Tentar novamente
-        </button>
       </div>
     );
 
   // ── Empty state ──
   if (matches.length === 0)
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{
-            background: T.surface(d),
-            border: `1px solid ${T.border(d)}`,
-          }}
-        >
-          <Trophy size={28} className="text-amber-400" />
+      <div className="pb-4 space-y-4">
+        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{
+              background: T.surface(d),
+              border: `1px solid ${T.border(d)}`,
+            }}
+          >
+            <Trophy size={28} className="text-amber-400" />
+          </div>
+          <p className="font-bold" style={{ color: T.text(d) }}>
+            Nenhum jogo encontrado
+          </p>
+          <p className="text-sm" style={{ color: T.textMuted(d) }}>
+            A rodada ainda não foi divulgada
+          </p>
+          <button
+            onClick={refetch}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs active:scale-95"
+            style={{
+              background: T.surface(d),
+              border: `1px solid ${T.border(d)}`,
+              color: T.textMuted(d),
+            }}
+          >
+            <RefreshCw size={13} /> Atualizar
+          </button>
         </div>
-        <p className="font-bold" style={{ color: T.text(d) }}>
-          Nenhum jogo encontrado
-        </p>
-        <p className="text-sm" style={{ color: T.textMuted(d) }}>
-          A rodada ainda não foi divulgada
-        </p>
-        <button
-          onClick={refetch}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs active:scale-95"
-          style={{
-            background: T.surface(d),
-            border: `1px solid ${T.border(d)}`,
-            color: T.textMuted(d),
-          }}
-        >
-          <RefreshCw size={13} /> Atualizar
-        </button>
       </div>
     );
 
   return (
     <div className="pb-4 space-y-3">
-      {/* ── Seletor de liga (oculto) ── */}
       {/* ── Navegação de rodadas ── */}
-      {/* Série A: navegação por data */}
       <div
         className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
         style={{ background: T.surface(d), borderColor: T.border(d) }}
@@ -1863,8 +1869,8 @@ function Apostar({
           <p className="font-black text-sm" style={{ color: T.text(d) }}>
             {loading
               ? "Carregando..."
-              : data?.roundNumber !== "?"
-                ? `Rodada ${data?.roundNumber}`
+              : espn.data?.roundNumber !== "?"
+                ? `Rodada ${espn.data?.roundNumber}`
                 : "Rodada atual"}
           </p>
           {!isCurrentRound ? (
@@ -1906,13 +1912,10 @@ function Apostar({
               className="text-xs mt-0.5 flex items-center gap-1.5"
               style={{ color: T.textMuted(d) }}
             >
-              <Wifi size={11} className="text-emerald-400" />
-              ESPN •{" "}
-              <span
-                className="font-bold"
-                style={{ color: LEAGUES["bra.1"].color }}
-              >
-                Série A
+              <Wifi size={11} style={{ color: LEAGUES["bra.1"].color }} />
+              ESPN + TheSportsDB •{" "}
+              <span className="font-bold" style={{ color: LEAGUES["bra.1"].color }}>
+                Série A + C
               </span>
             </p>
           </div>
@@ -1972,8 +1975,8 @@ function Apostar({
         >
           <Trophy size={13} className="text-indigo-400 shrink-0" />
           <p className="text-xs text-indigo-300">
-            {data?.roundNumber !== "?"
-              ? `Resultados da rodada ${data?.roundNumber}`
+            {espn.data?.roundNumber !== "?"
+              ? `Resultados da rodada ${espn.data?.roundNumber}`
               : "Resultados da rodada"}
           </p>
         </div>
@@ -2030,11 +2033,13 @@ function Apostar({
               >
                 {fmtDate(match.date)}
               </span>
-              <StatusBadge
-                status={match.status}
-                clock={match.clock}
-                closed={closed}
-              />
+              <div className="flex items-center gap-1.5">
+                <StatusBadge
+                  status={match.status}
+                  clock={match.clock}
+                  closed={closed}
+                />
+              </div>
             </div>
 
             <div className="flex items-center px-4 pb-4 pt-2 gap-3">
@@ -2329,7 +2334,7 @@ function Apostar({
                       match_id: m.id,
                       gols_home: parseInt(scores[m.id].home),
                       gols_away: parseInt(scores[m.id].away),
-                      league,
+                      league: m.league ?? "bra.1",
                     }));
 
                     const { error: upsertError } = await supabase
@@ -2555,6 +2560,7 @@ function Apostar({
           </div>
         </div>
       </div>
+
     </div>
   );
 }
@@ -3597,20 +3603,46 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-4"
           >
+            {/* Seletor de liga */}
+            <div
+              className="flex rounded-xl p-1 gap-1"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+            >
+              {(["bra.1", "bra.3"] as League[]).map((lg) => {
+                const active = admLeague === lg;
+                const cfg = LEAGUES[lg];
+                return (
+                  <button
+                    key={lg}
+                    onClick={() => setAdmLeague(lg)}
+                    className="flex-1 py-2 rounded-lg text-xs font-black transition-all"
+                    style={{
+                      background: active ? cfg.color + "22" : "transparent",
+                      border: active ? `1px solid ${cfg.color}55` : "1px solid transparent",
+                      color: active ? cfg.color : T.textMuted(d),
+                    }}
+                  >
+                    {cfg.label}
+                  </button>
+                );
+              })}
+            </div>
+
             <div className="p-4 rounded-2xl border bg-amber-400/5 border-amber-400/20">
               <p className="text-xs font-bold text-amber-400 uppercase mb-1">
                 Curadoria de Rodada
               </p>
               <p className="text-[11px]" style={{ color: T.textMuted(d) }}>
-                Selecione os jogos da ESPN para aparecerem.
+                Fonte: {admLeague === "bra.3" ? "TheSportsDB" : "ESPN"} •{" "}
+                {LEAGUES[admLeague].label}
               </p>
             </div>
 
             {/* Lista de jogos */}
             <div className="space-y-3">
-              {(roundData?.matches ?? []).map((m) => {
+              {(admMatches ?? []).map((m) => {
                 const isSelected = selectedMatchIds.includes(m.id);
-                const leagueColor = LEAGUES["bra.1"].color;
+                const leagueColor = LEAGUES[admLeague].color;
                 return (
                   <div
                     key={m.id}
@@ -3674,7 +3706,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                   </div>
                 );
               })}
-              {(roundData?.matches ?? []).length === 0 && (
+              {(admMatches ?? []).length === 0 && (
                 <p
                   className="text-center py-8 text-xs"
                   style={{ color: T.textMuted(d) }}
