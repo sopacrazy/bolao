@@ -3274,7 +3274,7 @@ function ManualMatchesAdmin({
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
   const d = isDark;
-  const [admTab, setAdmTab] = useState<"pending" | "bets" | "jogos">("bets");
+  const [admTab, setAdmTab] = useState<"pending" | "bets" | "jogos" | "usage">("bets");
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
@@ -3397,6 +3397,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
           { key: "bets", label: "Palpites", count: users.length },
           { key: "pending", label: "Pendentes", count: pending.length },
           { key: "jogos", label: "Rodada", count: selectedMatchIds.length },
+          { key: "usage", label: "Uso", count: 0 },
         ].map((t) => (
           <button
             key={t.key}
@@ -3611,6 +3612,15 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 )}
               </div>
             )}
+          </motion.div>
+        ) : admTab === "usage" ? (
+          <motion.div
+            key="usage"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <SupabaseUsageMonitor isDark={d} />
           </motion.div>
         ) : (
           <motion.div
@@ -4246,6 +4256,144 @@ export default function App() {
           onClose={() => setShowStandings(false)}
         />
       )}
+    </div>
+  );
+}
+function SupabaseUsageMonitor({ isDark }: { isDark: boolean }) {
+  const d = isDark;
+  const projectRef = "dxvvpuhbtypsxmthcljg";
+  const [token, setToken] = useState(() => localStorage.getItem("sb_mgmt_token") || "");
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchUsage = async () => {
+    if (!token) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/usage`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error("Token inválido ou erro na API");
+      const json = await res.json();
+      setData(json);
+      localStorage.setItem("sb_mgmt_token", token);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token && token.length > 50) fetchUsage();
+  }, []);
+
+  const ResourceBar = ({ label, current, max, unit }: any) => {
+    const pct = Math.min(100, (current / max) * 100);
+    const isWarning = pct > 80;
+    return (
+      <div className="space-y-1.5">
+        <div className="flex justify-between items-end">
+          <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textMuted(d) }}>{label}</p>
+          <p className="text-[11px] font-black" style={{ color: isWarning ? "#F87171" : T.text(d) }}>
+            {current.toFixed(2)} / {max} {unit}
+          </p>
+        </div>
+        <div className="h-2 rounded-full overflow-hidden" style={{ background: T.elevated(d) }}>
+          <motion.div 
+            initial={{ width: 0 }}
+            animate={{ width: `${pct}%` }}
+            className="h-full rounded-full"
+            style={{ background: isWarning ? "linear-gradient(90deg, #F87171, #EF4444)" : "linear-gradient(90deg, #34D399, #10B981)" }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="p-5 rounded-3xl border space-y-4" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 flex items-center justify-center">
+            <Shield size={20} className="text-emerald-400" />
+          </div>
+          <div>
+            <h3 className="font-black text-sm" style={{ color: T.text(d) }}>Limites do Plano Free</h3>
+            <p className="text-[10px]" style={{ color: T.textMuted(d) }}>Monitoramento em tempo real do Supabase</p>
+          </div>
+        </div>
+
+        {!data && !loading && (
+          <div className="space-y-3">
+            <p className="text-[11px]" style={{ color: T.textMuted(d) }}>Insira seu Access Token do Supabase para visualizar o uso:</p>
+            <div className="flex gap-2">
+              <input 
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="sbp_..."
+                className="flex-1 px-4 py-2.5 rounded-xl text-xs outline-none border transition-all"
+                style={{ background: T.elevated(d), borderColor: T.border(d), color: T.text(d) }}
+              />
+              <button 
+                onClick={fetchUsage}
+                className="px-4 py-2.5 rounded-xl bg-emerald-500 text-slate-950 text-xs font-bold active:scale-95 transition-all"
+              >
+                Conectar
+              </button>
+            </div>
+            {error && <p className="text-[10px] text-red-400 font-bold">⚠️ {error}</p>}
+          </div>
+        )}
+
+        {loading && (
+          <div className="py-10 flex flex-col items-center gap-3">
+            <RefreshCw size={24} className="animate-spin text-emerald-400" />
+            <p className="text-[10px]" style={{ color: T.textMuted(d) }}>Consultando infraestrutura...</p>
+          </div>
+        )}
+
+        {data && (
+          <div className="space-y-6">
+            <ResourceBar 
+              label="Banco de Dados" 
+              current={(data.db_size?.usage || 0) / (1024 * 1024)} 
+              max={500} 
+              unit="MB" 
+            />
+            <ResourceBar 
+              label="Armazenamento (Storage)" 
+              current={(data.storage_size?.usage || 0) / (1024 * 1024)} 
+              max={1024} 
+              unit="MB" 
+            />
+            <ResourceBar 
+              label="Usuários Ativos (MAU)" 
+              current={data.monthly_active_users?.usage || 0} 
+              max={50000} 
+              unit="usuários" 
+            />
+            
+            <div className="pt-2 border-t" style={{ borderColor: T.border(d) }}>
+              <button 
+                onClick={() => { setData(null); setToken(""); localStorage.removeItem("sb_mgmt_token"); }}
+                className="text-[10px] font-bold text-red-400 flex items-center gap-1 opacity-60 hover:opacity-100 transition-all"
+              >
+                Desconectar Token
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 rounded-2xl bg-blue-500/5 border border-blue-500/20">
+        <p className="text-[10px] text-blue-300 leading-relaxed">
+          <b>Nota:</b> O Supabase Free Tier tem limites rigorosos. Se o banco exceder 500MB, ele pode entrar em modo leitura. Monitore sempre!
+        </p>
+      </div>
     </div>
   );
 }
