@@ -58,6 +58,7 @@ interface RodadaData {
 
 const LEAGUES = {
   "bra.1": { label: "Série A", short: "A", color: "#22C55E" },
+  "bra.3": { label: "Série C", short: "C", color: "#F59E0B" },
 };
 
 type League = keyof typeof LEAGUES;
@@ -66,7 +67,7 @@ const espnBase = (lg: League) =>
   `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/scoreboard`;
 const espnSummary = (lg: League) =>
   `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/summary`;
-const CACHE_KEY = "bolao_espn_v3";
+const CACHE_KEY = "bolao_espn_v4";
 const CACHE_TTL = 90 * 1000; // 90s
 
 // Formata Date → "YYYYMMDD"
@@ -88,8 +89,8 @@ function parseMatches(events: any[]): Match[] {
       away: away.team?.abbreviation ?? "?",
       homeName: home.team?.shortDisplayName ?? home.team?.displayName ?? "?",
       awayName: away.team?.shortDisplayName ?? away.team?.displayName ?? "?",
-      homeLogo: home.team?.logo ?? "",
-      awayLogo: away.team?.logo ?? "",
+      homeLogo: home.team?.logo ? `https://images.weserv.nl/?url=${encodeURIComponent(home.team.logo)}&w=100` : "",
+      awayLogo: away.team?.logo ? `https://images.weserv.nl/?url=${encodeURIComponent(away.team.logo)}&w=100` : "",
       homeScore: home.score ?? "-",
       awayScore: away.score ?? "-",
       date: ev.date ?? "",
@@ -286,7 +287,7 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
 
 const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/123";
 const TSDB_LEAGUE = "4625";
-const TSDB_CACHE = "bolao_seriesc_v1";
+const TSDB_CACHE = "bolao_seriesc_v2";
 const TSDB_TTL = 30 * 60 * 1000; // 30 min
 
 const TSDB_STATUS: Record<string, string> = {
@@ -316,8 +317,8 @@ function parseTsdbEvents(events: any[]): Match[] {
       away: (ev.strAwayTeam ?? "?").substring(0, 3).toUpperCase(),
       homeName: ev.strHomeTeam ?? "?",
       awayName: ev.strAwayTeam ?? "?",
-      homeLogo: ev.strHomeTeamBadge ?? ev.strTeamHomeBadge ?? "",
-      awayLogo: ev.strAwayTeamBadge ?? ev.strTeamAwayBadge ?? "",
+      homeLogo: (ev.strHomeTeamBadge ?? ev.strTeamHomeBadge) ? `https://images.weserv.nl/?url=${encodeURIComponent(ev.strHomeTeamBadge ?? ev.strTeamHomeBadge)}&w=100` : "",
+      awayLogo: (ev.strAwayTeamBadge ?? ev.strTeamAwayBadge) ? `https://images.weserv.nl/?url=${encodeURIComponent(ev.strAwayTeamBadge ?? ev.strTeamAwayBadge)}&w=100` : "",
       homeScore,
       awayScore,
       date: dateStr,
@@ -599,6 +600,7 @@ function TeamLogo({
           src={src}
           alt={abbr}
           className="w-8 h-8 object-contain"
+          crossOrigin="anonymous"
           onError={() => setErr(true)}
         />
       ) : (
@@ -701,7 +703,8 @@ function useStandings() {
             const parsed: StandingEntry[] = rawEntries
               .map((e: any) => {
                 const stats: any[] = e.stats ?? [];
-                const logo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
+                const rawLogo = e.team?.logos?.[0]?.href ?? e.team?.logo ?? "";
+                const logo = rawLogo ? `https://images.weserv.nl/?url=${encodeURIComponent(rawLogo)}&w=100` : "";
                 return {
                   pos: 0,
                   teamAbbr: e.team?.abbreviation ?? "?",
@@ -1747,7 +1750,7 @@ function Apostar({
         } catch (e) {
           console.error("[Bolão] Falha na pré-geração:", e);
         }
-      }, 1000); // pequeno delay para garantir render
+      }, 2000); // 2s delay to ensure all logos (especially TSDB) are loaded
       return () => clearTimeout(timer);
     }
   }, [isLocked, matches.length, isDark]);
@@ -2541,25 +2544,51 @@ function Apostar({
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 flex items-center gap-3">
-                      <img
-                        src={m.homeLogo}
-                        className="w-6 h-6 object-contain"
-                        alt=""
-                      />
-                      <span className="text-xs font-bold">{m.home}</span>
+                      <div 
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border"
+                        style={{ background: T.avatarBg(d), borderColor: T.border(d) }}
+                      >
+                        {m.homeLogo ? (
+                          <img
+                            src={m.homeLogo}
+                            className="w-7 h-7 object-contain"
+                            crossOrigin="anonymous"
+                            alt=""
+                          />
+                        ) : (
+                          <span className="text-[10px] font-black opacity-30" style={{ color: T.text(d) }}>
+                            {m.home}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold" style={{ color: T.text(d) }}>{m.home}</span>
                     </div>
-                    <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-amber-400/10 text-amber-400">
-                      <span className="font-black text-sm">{bet.home}</span>
-                      <span className="text-[10px] opacity-40">×</span>
-                      <span className="font-black text-sm">{bet.away}</span>
+
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-400/10 text-amber-400 border border-amber-400/20">
+                      <span className="font-black text-base">{bet.home}</span>
+                      <span className="text-xs opacity-40">×</span>
+                      <span className="font-black text-base">{bet.away}</span>
                     </div>
+
                     <div className="flex-1 flex items-center gap-3 justify-end">
-                      <span className="text-xs font-bold">{m.away}</span>
-                      <img
-                        src={m.awayLogo}
-                        className="w-6 h-6 object-contain"
-                        alt=""
-                      />
+                      <span className="text-sm font-bold" style={{ color: T.text(d) }}>{m.away}</span>
+                      <div 
+                        className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden border"
+                        style={{ background: T.avatarBg(d), borderColor: T.border(d) }}
+                      >
+                        {m.awayLogo ? (
+                          <img
+                            src={m.awayLogo}
+                            className="w-7 h-7 object-contain"
+                            crossOrigin="anonymous"
+                            alt=""
+                          />
+                        ) : (
+                          <span className="text-[10px] font-black opacity-30" style={{ color: T.text(d) }}>
+                            {m.away}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3311,15 +3340,13 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     const { data: appUsers } = await supabase
       .from("usuarios")
       .select("*")
-      .eq("status", "aprovado")
-      .neq("cargo", "Adm");
+      .eq("status", "aprovado");
     const { data: betsData } = await supabase
       .from("palpites")
       .select("usuario_id");
     const { data: selMatches } = await supabase
       .from("jogos_selecionados")
-      .select("match_id")
-      .eq("league", admLeague);
+      .select("match_id");
 
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
@@ -3559,7 +3586,10 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
 
                 <UserBetsList
                   userId={selectedUser.id}
-                  roundMatches={roundData?.matches || []}
+                  roundMatches={[
+                    ...(roundData?.matches || []),
+                    ...(serieCAdmData?.matches || []),
+                  ].filter((m) => selectedMatchIds.includes(m.id))}
                   isDark={d}
                 />
               </div>
@@ -3651,7 +3681,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
               </p>
               <p className="text-[11px]" style={{ color: T.textMuted(d) }}>
                 Fonte: {admLeague === "bra.3" ? "TheSportsDB" : "ESPN"} •{" "}
-                {LEAGUES[admLeague].label}
+                {LEAGUES[admLeague]?.label ?? "Série ?"}
               </p>
             </div>
 
@@ -3659,7 +3689,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             <div className="space-y-3">
               {(admMatches ?? []).map((m) => {
                 const isSelected = selectedMatchIds.includes(m.id);
-                const leagueColor = LEAGUES[admLeague].color;
+                const leagueColor = LEAGUES[admLeague]?.color ?? "#64748B";
                 return (
                   <div
                     key={m.id}
