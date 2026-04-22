@@ -114,57 +114,77 @@ function eventRound(ev: any): number | null {
 }
 
 // Dado um array de eventos ESPN, retorna somente os da próxima rodada ativa.
-// "Próxima rodada ativa" = menor rodada com ao menos 1 jogo não finalizado.
-// Se TODOS os jogos estão finalizados, aguarda 24h antes de liberar nova rodada.
-// Para histórico (onlyFirst=false), retorna todos sem filtrar por rodada.
+// Estratégia: agrupa por número de rodada do ESPN; se não disponível, agrupa
+// por clusters de data (jogos num janela de 5 dias formam uma rodada).
+// Se TODOS os jogos já finalizaram, aguarda 24h antes de liberar nova rodada.
+// Para histórico (onlyFirst=false), retorna todos sem filtrar.
 function filterNextRound(events: any[], onlyFirst: boolean): { events: any[]; roundNumber: number | string } {
   if (!events.length) return { events: [], roundNumber: "?" };
 
   if (!onlyFirst) {
-    // Modo histórico: retorna tudo, usa rodada do primeiro evento
     const rn = eventRound(events[0]) ?? "?";
     return { events, roundNumber: rn };
   }
 
-  // Agrupa por número de rodada
+  // ── Tentativa 1: agrupar por número de rodada ESPN ──
   const groups = new Map<number, any[]>();
-  const fallback: any[] = []; // eventos sem número de rodada detectável
   for (const ev of events) {
     const rn = eventRound(ev);
     if (rn !== null) {
       if (!groups.has(rn)) groups.set(rn, []);
       groups.get(rn)!.push(ev);
-    } else {
-      fallback.push(ev);
     }
   }
 
-  // Se não conseguiu distinguir rodadas, cai no comportamento antigo
-  if (groups.size === 0) return { events: fallback, roundNumber: "?" };
-
-  const sortedRounds = [...groups.keys()].sort((a, b) => a - b);
-
-  // Encontra a menor rodada com ao menos 1 jogo não finalizado
-  for (const rn of sortedRounds) {
-    const evs = groups.get(rn)!;
-    const hasOpen = evs.some((ev) => {
-      const st = ev.status?.type?.name ?? "";
-      return st !== "STATUS_FINAL" && st !== "STATUS_CANCELED" && st !== "STATUS_POSTPONED";
-    });
-    if (hasOpen) return { events: evs, roundNumber: rn };
+  // ── Tentativa 2 (fallback): agrupar por cluster de datas ──
+  // Ordena por data e agrupa eventos que estão dentro de 5 dias do primeiro
+  if (groups.size < 2) {
+    const sorted = [...events].sort(
+      (a, b) => new Date(a.date ?? 0).getTime() - new Date(b.date ?? 0).getTime(),
+    );
+    groups.clear();
+    let groupId = 0;
+    let windowStart = -Infinity;
+    const WINDOW = 5 * 24 * 60 * 60 * 1000; // 5 dias
+    for (const ev of sorted) {
+      const t = new Date(ev.date ?? 0).getTime();
+      if (t - windowStart > WINDOW) {
+        groupId++;
+        windowStart = t;
+      }
+      if (!groups.has(groupId)) groups.set(groupId, []);
+      groups.get(groupId)!.push(ev);
+    }
   }
 
-  // Todas as rodadas encerradas — regra de 24h de espera
-  const lastRound = sortedRounds[sortedRounds.length - 1];
-  const lastEvs = groups.get(lastRound)!;
+  const sortedKeys = [...groups.keys()].sort((a, b) => a - b);
+
+  // Encontra o primeiro grupo com ao menos 1 jogo não finalizado
+  const isFinal = (ev: any) => {
+    const st = ev.status?.type?.name ?? "";
+    return st === "STATUS_FINAL" || st === "STATUS_CANCELED" || st === "STATUS_POSTPONED";
+  };
+
+  for (const key of sortedKeys) {
+    const evs = groups.get(key)!;
+    if (evs.some((ev) => !isFinal(ev))) {
+      const rn = eventRound(evs[0]) ?? key;
+      return { events: evs, roundNumber: rn };
+    }
+  }
+
+  // Todos os grupos encerrados — regra de 24h antes de mostrar próxima rodada
+  const lastKey = sortedKeys[sortedKeys.length - 1];
+  const lastEvs = groups.get(lastKey)!;
   const latestTs = Math.max(...lastEvs.map((ev) => new Date(ev.date ?? 0).getTime()));
   const ONE_DAY = 24 * 60 * 60 * 1000;
   if (Date.now() - latestTs < ONE_DAY) {
-    // Dentro do período de espera: mostra a rodada encerrada (sem novos jogos)
-    return { events: lastEvs, roundNumber: lastRound };
+    // Dentro da janela de espera: continua mostrando a rodada encerrada
+    const rn = eventRound(lastEvs[0]) ?? lastKey;
+    return { events: lastEvs, roundNumber: rn };
   }
 
-  // Passou 1 dia: não há rodada para exibir ainda (espera o admin liberar nova)
+  // Passou 1 dia: exibe vazio (admin libera nova rodada)
   return { events: [], roundNumber: "?" };
 }
 
