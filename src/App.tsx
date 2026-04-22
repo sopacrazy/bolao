@@ -27,6 +27,10 @@ import {
   Send,
   X,
   List,
+  LayoutDashboard,
+  CheckCircle2,
+  Clock,
+  Gamepad2,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
@@ -3330,13 +3334,17 @@ function ManualMatchesAdmin({
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
   const d = isDark;
-  const [admTab, setAdmTab] = useState<"pending" | "bets" | "jogos">("bets");
+  const [admTab, setAdmTab] = useState<"dashboard" | "pending" | "bets" | "jogos">(
+    "dashboard",
+  );
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [totalBets, setTotalBets] = useState(0);
+  const [userTotal, setUserTotal] = useState(0);
 
   // Controle de jogos selecionados
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
@@ -3375,11 +3383,17 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       .from("jogos_selecionados")
       .select("match_id");
 
+    const { data: allUsers } = await supabase
+      .from("usuarios")
+      .select("id");
+
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
     );
     setPending(pendUsers || []);
     setUsers((appUsers || []).filter((u) => usersWithBets.has(u.id)));
+    setTotalBets(betsData?.length || 0);
+    setUserTotal(allUsers?.length || 0);
     setSelectedMatchIds((selMatches || []).map((m) => m.match_id));
     setLoading(false);
   };
@@ -3442,46 +3456,134 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
 
   return (
     <div className="pb-24 space-y-5">
-      {/* Mini Nav Adm */}
-      <div
-        className="flex p-1 rounded-2xl border"
-        style={{ background: T.surface(d), borderColor: T.border(d) }}
-      >
-        {[
-          { key: "bets", label: "Palpites", count: users.length },
-          { key: "pending", label: "Pendentes", count: pending.length },
-          { key: "jogos", label: "Rodada", count: selectedMatchIds.length },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => {
-              setAdmTab(t.key as any);
-              setSelectedUser(null);
-            }}
-            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all relative"
-            style={{ color: admTab === t.key ? T.text(d) : T.textMuted(d) }}
-          >
-            {admTab === t.key && (
-              <motion.div
-                layoutId="admTab"
-                className="absolute inset-0 rounded-xl"
-                style={{ background: T.elevated(d) }}
-              />
-            )}
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              {t.label}
-              {t.count > 0 && (
-                <span className="w-5 h-5 rounded-full bg-amber-400/10 text-amber-400 flex items-center justify-center text-[10px]">
-                  {t.count}
-                </span>
-              )}
-            </span>
-          </button>
-        ))}
-      </div>
+      {admTab !== "dashboard" && (
+        <button
+          onClick={() => {
+            setAdmTab("dashboard");
+            setSelectedUser(null);
+          }}
+          className="flex items-center gap-2 px-5 py-3 rounded-[1.5rem] text-xs font-black transition-all active:scale-95 border shadow-sm"
+          style={{
+            background: T.surface(d),
+            borderColor: T.border(d),
+            color: T.text(d),
+          }}
+        >
+          <ChevronLeft size={16} className="text-amber-400" />
+          Voltar ao Início
+        </button>
+      )}
 
       <AnimatePresence mode="wait">
-        {admTab === "pending" ? (
+        {admTab === "dashboard" ? (
+          <motion.div
+            key="dashboard"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            <div className="grid grid-cols-2 gap-3">
+              <div
+                className="p-5 rounded-[2rem] border"
+                style={{ background: T.surface(d), borderColor: T.border(d) }}
+              >
+                <div className="w-10 h-10 rounded-2xl bg-amber-400/10 flex items-center justify-center mb-4">
+                  <Users size={20} className="text-amber-400" />
+                </div>
+                <p
+                  className="text-[10px] font-black uppercase tracking-wider opacity-40 mb-1"
+                  style={{ color: T.text(d) }}
+                >
+                  Total Usuários
+                </p>
+                <p className="text-2xl font-black" style={{ color: T.text(d) }}>
+                  {userTotal}
+                </p>
+              </div>
+
+              <div
+                className="p-5 rounded-[2rem] border"
+                style={{ background: T.surface(d), borderColor: T.border(d) }}
+              >
+                <div className="w-10 h-10 rounded-2xl bg-indigo-400/10 flex items-center justify-center mb-4">
+                  <Target size={20} className="text-indigo-400" />
+                </div>
+                <p
+                  className="text-[10px] font-black uppercase tracking-wider opacity-40 mb-1"
+                  style={{ color: T.text(d) }}
+                >
+                  Total Palpites
+                </p>
+                <p className="text-2xl font-black" style={{ color: T.text(d) }}>
+                  {totalBets}
+                </p>
+              </div>
+            </div>
+
+            {/* Menu de Navegação do ADM */}
+            <div className="grid grid-cols-1 gap-3">
+              {[
+                {
+                  key: "bets",
+                  label: "Gerenciar Palpites",
+                  sub: "Veja e edite palpites dos usuários",
+                  icon: Target,
+                  color: "text-amber-400",
+                },
+                {
+                  key: "pending",
+                  label: "Usuários Pendentes",
+                  sub: `${pending.length} usuários aguardando aprovação`,
+                  icon: Clock,
+                  color: "text-indigo-400",
+                  badge: pending.length,
+                },
+                {
+                  key: "jogos",
+                  label: "Rodada",
+                  sub: `${selectedMatchIds.length} jogos selecionados`,
+                  icon: Gamepad2,
+                  color: "text-emerald-400",
+                },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setAdmTab(item.key as any)}
+                  className="flex items-center gap-4 p-4 rounded-[2rem] border transition-all active:scale-[0.98]"
+                  style={{ background: T.surface(d), borderColor: T.border(d) }}
+                >
+                  <div
+                    className={`w-12 h-12 rounded-2xl flex items-center justify-center bg-white/5 border relative`}
+                    style={{ borderColor: T.border(d) }}
+                  >
+                    <item.icon size={20} className={item.color} />
+                    {item.badge !== undefined && item.badge > 0 && (
+                      <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] font-black">
+                        {item.badge}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-left flex-1 min-w-0">
+                    <p
+                      className="font-bold text-sm"
+                      style={{ color: T.text(d) }}
+                    >
+                      {item.label}
+                    </p>
+                    <p
+                      className="text-[10px] opacity-50 truncate"
+                      style={{ color: T.text(d) }}
+                    >
+                      {item.sub}
+                    </p>
+                  </div>
+                  <ChevronRight size={16} className="opacity-20" />
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        ) : admTab === "pending" ? (
           <motion.div
             key="pending"
             initial={{ opacity: 0, y: 10 }}
