@@ -27,6 +27,11 @@ import {
   Send,
   X,
   List,
+  Plus,
+  ChevronDown,
+  Trash2,
+  AlertTriangle,
+  Settings,
   LayoutDashboard,
   CheckCircle2,
   Clock,
@@ -1834,7 +1839,7 @@ function Apostar({
 
   useEffect(() => {
     if (espn.data?.matches || seriec.data?.matches) fetchUserBets();
-  }, [espn.data?.matches, seriec.data?.matches, anchorTs]);
+  }, [espn.data?.matches, seriec.data?.matches, anchorTs, user?.id]);
 
   const fetchUserBets = async () => {
     if (!user) return;
@@ -3687,7 +3692,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
 
     const { data: allUsers } = await supabase
       .from("usuarios")
-      .select("id");
+      .select("id")
+      .eq("status", "aprovado");
 
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
@@ -4495,13 +4501,38 @@ export default function App() {
   const [totalUserPoints, setTotalUserPoints] = useState(0);
   const [aiMatch, setAiMatch] = useState<Match | null>(null);
 
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [activeProfile, setActiveProfile] = useState<any>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showAddProfile, setShowAddProfile] = useState(false);
+  const [newProfileName, setNewProfileName] = useState("");
+  const [addingProfile, setAddingProfile] = useState(false);
+  const [customAlert, setCustomAlert] = useState<{ title: string; message: string; type: 'error' | 'success' } | null>(null);
+  const [profileToDelete, setProfileToDelete] = useState<any>(null);
+  const [deletingProfile, setDeletingProfile] = useState(false);
+  const [showUserSettings, setShowUserSettings] = useState(false);
+
   useEffect(() => {
     const savedUser = localStorage.getItem("bolao_user");
     if (savedUser) {
       const u = JSON.parse(savedUser);
       setUser(u);
+      setActiveProfile(u);
       setAuth(true);
       setIsDark(u.dark_mode === true);
+
+      supabase
+        .from("usuarios")
+        .select("*")
+        .eq("cargo", `dependente:${u.id}`)
+        .eq("status", "aprovado")
+        .then(({ data }) => {
+          if (data) {
+            setProfiles([u, ...data]);
+          } else {
+            setProfiles([u]);
+          }
+        });
     }
     // Esconde a splash screen nativa assim que o app carregar
     SplashScreen.hide();
@@ -4586,13 +4617,77 @@ export default function App() {
                     >
                       Olá,
                     </p>
-                    <div className="flex items-center gap-2">
-                      <h1
-                        className="font-black text-2xl tracking-tight"
-                        style={{ color: T.text(d) }}
+                    <div className="flex items-center gap-2 relative">
+                      <button
+                        onClick={() => setShowProfileMenu(!showProfileMenu)}
+                        className="flex items-center gap-1.5 focus:outline-none"
                       >
-                        {user?.apelido ?? user?.nome ?? "Jogador"}
-                      </h1>
+                        <h1
+                          className="font-black text-2xl tracking-tight"
+                          style={{ color: T.text(d) }}
+                        >
+                          {activeProfile?.apelido ?? activeProfile?.nome ?? "Jogador"}
+                        </h1>
+                        <ChevronDown size={20} style={{ color: T.textMuted(d) }} />
+                      </button>
+
+                      <AnimatePresence>
+                        {showProfileMenu && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            className="absolute top-full mt-2 w-56 rounded-2xl p-2 shadow-2xl z-50 border"
+                            style={{
+                              background: T.surface(d),
+                              borderColor: T.border(d),
+                            }}
+                          >
+                            {profiles.map((p) => (
+                              <button
+                                key={p.id}
+                                onClick={() => {
+                                  setActiveProfile(p);
+                                  setShowProfileMenu(false);
+                                }}
+                                className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                              >
+                                <span className="font-bold text-sm" style={{ color: T.text(d) }}>
+                                  {p.apelido ?? p.nome}
+                                </span>
+                                {activeProfile?.id === p.id && (
+                                  <CheckCircle2 size={16} className="text-amber-500" />
+                                )}
+                              </button>
+                            ))}
+                            <div className="my-1 border-t" style={{ borderColor: T.border(d) }} />
+                            <button
+                              onClick={() => {
+                                setShowProfileMenu(false);
+                                setShowAddProfile(true);
+                              }}
+                              className="w-full flex items-center gap-2 p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                            >
+                              <Plus size={16} className="text-emerald-500" />
+                              <span className="font-bold text-sm text-emerald-500">
+                                Novo Palpiteiro
+                              </span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowProfileMenu(false);
+                                setShowUserSettings(true);
+                              }}
+                              className="w-full flex items-center gap-2 p-3 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                            >
+                              <Settings size={16} style={{ color: T.textMuted(d) }} />
+                              <span className="font-bold text-sm" style={{ color: T.text(d) }}>
+                                Configurações
+                              </span>
+                            </button>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                       <span
                         className="px-2 py-0.5 rounded-lg text-xs font-black"
                         style={{
@@ -4622,8 +4717,8 @@ export default function App() {
                       className="text-xs font-bold uppercase tracking-widest mb-0.5"
                       style={{ color: T.textMuted(d) }}
                     >
-                      {user?.apelido
-                        ? `Ola, ${user.apelido}`
+                      {activeProfile?.apelido
+                        ? `Ola, ${activeProfile.apelido}`
                         : "Bolão dos Clássicos"}
                     </p>
                     <h1
@@ -4697,7 +4792,7 @@ export default function App() {
                 transition={{ duration: 0.2 }}
               >
                 <Apostar
-                  user={user}
+                  user={activeProfile}
                   isDark={isDark}
                   onRoundLoad={setRoundNumber}
                   onPointsChange={setTotalUserPoints}
@@ -4712,7 +4807,7 @@ export default function App() {
                 exit={{ opacity: 0, x: 12 }}
                 transition={{ duration: 0.2 }}
               >
-                <Ranking isDark={isDark} user={user} />
+                <Ranking isDark={isDark} user={activeProfile} />
               </motion.div>
             )}
             {tab === "analista" && (
@@ -4812,6 +4907,267 @@ export default function App() {
           isDark={isDark}
         />
       )}
+
+      {/* Add Profile Modal */}
+      {showAddProfile && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
+            style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+          >
+            <h3 className="font-black text-xl mb-2" style={{ color: T.text(d) }}>
+              Novo Perfil de Palpite
+            </h3>
+            <p className="text-sm mb-4" style={{ color: T.textMuted(d) }}>
+              Crie um novo apelido para registrar palpites independentes nesta conta.
+            </p>
+            <input
+              type="text"
+              placeholder="Digite o apelido"
+              value={newProfileName}
+              onChange={(e) => setNewProfileName(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl font-medium outline-none transition-all mb-4"
+              style={{
+                background: T.inputBg(d),
+                border: `1px solid ${T.inputBdr(d)}`,
+                color: T.text(d),
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowAddProfile(false)}
+                className="flex-1 py-3 rounded-xl font-bold text-sm"
+                style={{ background: T.inputBg(d), color: T.text(d) }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!newProfileName.trim() || addingProfile) return;
+                  setAddingProfile(true);
+                  const newProfile = {
+                    nome: user.nome,
+                    sobrenome: user.sobrenome,
+                    apelido: newProfileName.trim(),
+                    email: `${user.id}+${Date.now()}@dependent.local`,
+                    senha: user.senha,
+                    cargo: `dependente:${user.id}`,
+                    status: "aprovado"
+                  };
+                  const { data, error } = await supabase.from("usuarios").insert([newProfile]).select().single();
+                  setAddingProfile(false);
+                  if (!error && data) {
+                    setProfiles([...profiles, data]);
+                    setActiveProfile(data);
+                    setShowAddProfile(false);
+                    setNewProfileName("");
+                  } else {
+                    if (error?.code === "23505") {
+                      setCustomAlert({ title: "Apelido em Uso", message: "Este apelido já está em uso por outro jogador. Por favor, escolha outro.", type: 'error' });
+                    } else {
+                      setCustomAlert({ title: "Erro", message: "Ocorreu um erro ao criar o perfil. Tente novamente.", type: 'error' });
+                    }
+                  }
+                }}
+                disabled={!newProfileName.trim() || addingProfile}
+                className="flex-1 py-3 rounded-xl font-bold text-sm bg-amber-500 text-black shadow-lg shadow-amber-500/20"
+                style={{ opacity: !newProfileName.trim() || addingProfile ? 0.5 : 1 }}
+              >
+                {addingProfile ? "Criando..." : "Criar Perfil"}
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Delete Profile Modal */}
+      <AnimatePresence>
+        {profileToDelete && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+            >
+              <div className="w-12 h-12 rounded-full flex items-center justify-center bg-red-500/10 text-red-500 mb-4 mx-auto">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="font-black text-xl mb-2 text-center" style={{ color: T.text(d) }}>
+                Excluir Perfil?
+              </h3>
+              <p className="text-sm mb-6 text-center" style={{ color: T.textMuted(d) }}>
+                Tem certeza que deseja excluir o perfil <strong>{profileToDelete.apelido}</strong>? Todos os palpites associados a este perfil também serão apagados.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setProfileToDelete(null)}
+                  disabled={deletingProfile}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+                  style={{ background: T.inputBg(d), color: T.text(d) }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    setDeletingProfile(true);
+                    // Inativa o usuário para sumir do sistema
+                    const { error } = await supabase.from("usuarios").update({ status: "inativo" }).eq("id", profileToDelete.id);
+                    // Deleta os palpites vinculados para não somar no contador total do admin
+                    await supabase.from("palpites").delete().eq("usuario_id", profileToDelete.id);
+                    setDeletingProfile(false);
+                    if (error) {
+                      setCustomAlert({ title: "Erro na Exclusão", message: "Ocorreu um erro ao excluir o perfil. Tente novamente.", type: 'error' });
+                    } else {
+                      setProfiles(profiles.filter(p => p.id !== profileToDelete.id));
+                      if (activeProfile?.id === profileToDelete.id) {
+                        setActiveProfile(user);
+                      }
+                      setProfileToDelete(null);
+                      setCustomAlert({ title: "Perfil Excluído", message: "O perfil foi removido com sucesso.", type: 'success' });
+                    }
+                  }}
+                  disabled={deletingProfile}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm bg-red-500 text-white shadow-lg shadow-red-500/20 flex justify-center items-center gap-2 transition-all active:scale-95"
+                  style={{ opacity: deletingProfile ? 0.5 : 1 }}
+                >
+                  {deletingProfile ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : "Sim, Excluir"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Custom Alert Modal */}
+      <AnimatePresence>
+        {customAlert && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="w-full max-w-sm rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+            >
+              {customAlert.type === 'error' ? (
+                <div className="w-16 h-16 rounded-full flex items-center justify-center bg-red-500/10 text-red-500 mb-4">
+                  <AlertTriangle size={32} />
+                </div>
+              ) : (
+                <div className="w-16 h-16 rounded-full flex items-center justify-center bg-emerald-500/10 text-emerald-500 mb-4">
+                  <CheckCircle2 size={32} />
+                </div>
+              )}
+              <h3 className="font-black text-xl mb-2" style={{ color: T.text(d) }}>
+                {customAlert.title}
+              </h3>
+              <p className="text-sm mb-6" style={{ color: T.textMuted(d) }}>
+                {customAlert.message}
+              </p>
+              <button
+                onClick={() => setCustomAlert(null)}
+                className="w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-95 shadow-lg"
+                style={{
+                  background: customAlert.type === 'error' ? '#EF4444' : '#10B981',
+                  color: '#FFFFFF',
+                  boxShadow: customAlert.type === 'error' ? '0 10px 15px -3px rgba(239, 68, 68, 0.2)' : '0 10px 15px -3px rgba(16, 185, 129, 0.2)'
+                }}
+              >
+                Entendi
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* User Settings Modal */}
+      <AnimatePresence>
+        {showUserSettings && (
+          <div className="fixed inset-0 z-[200] flex flex-col bg-black/60 backdrop-blur-md">
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="mt-auto w-full max-w-lg mx-auto rounded-t-[40px] p-8 pb-12 shadow-2xl"
+              style={{ background: T.bg(d) }}
+            >
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="font-black text-3xl tracking-tight" style={{ color: T.text(d) }}>
+                  Configurações
+                </h2>
+                <button
+                  onClick={() => setShowUserSettings(false)}
+                  className="w-10 h-10 rounded-full flex items-center justify-center bg-black/5 dark:bg-white/5"
+                  style={{ color: T.text(d) }}
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-xs font-black uppercase tracking-widest mb-4" style={{ color: T.textMuted(d) }}>
+                    Gerenciar Perfis
+                  </h3>
+                  <div className="space-y-3">
+                    {profiles.map((p) => (
+                      <div
+                        key={p.id}
+                        className="p-4 rounded-2xl border flex items-center justify-between"
+                        style={{ background: T.surface(d), borderColor: T.border(d) }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-500 flex items-center justify-center font-black">
+                            {p.apelido?.[0]?.toUpperCase() ?? p.nome?.[0]?.toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="font-bold text-sm" style={{ color: T.text(d) }}>
+                              {p.apelido ?? p.nome}
+                            </p>
+                            <p className="text-[10px] uppercase font-black tracking-wider" style={{ color: T.textMuted(d) }}>
+                              {p.id === user.id ? "Perfil Principal" : "Perfil Adicional"}
+                            </p>
+                          </div>
+                        </div>
+
+                        {p.id !== user.id && (
+                          <button
+                            onClick={() => {
+                              setProfileToDelete(p);
+                            }}
+                            className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t" style={{ borderColor: T.border(d) }}>
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem("bolao_user");
+                      window.location.reload();
+                    }}
+                    className="w-full py-4 rounded-2xl font-black text-sm bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                  >
+                    Sair da Conta
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
