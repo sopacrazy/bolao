@@ -2976,6 +2976,37 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
   };
   const [rankList, setRankList] = useState<RankUser[]>([]);
   const [loadingRank, setLoadingRank] = useState(true);
+  const shareRef = React.useRef<HTMLDivElement>(null);
+  const [sharing, setSharing] = useState(false);
+
+  const handleShareRanking = async () => {
+    if (!shareRef.current || sharing) return;
+    setSharing(true);
+    try {
+      const dataUrl = await domToPng(shareRef.current, {
+        scale: 2,
+        backgroundColor: d ? "#0F172A" : "#FFFFFF",
+      });
+      const res = await fetch(dataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], "ranking.png", { type: "image/png" });
+
+      if (navigator.share) {
+        await navigator.share({
+          files: [file],
+          title: "Ranking - Bolão dos Clássicos",
+          text: `🏆 Confira o Top 10 do Bolão dos Clássicos!\n\n1º ${rankList[0]?.name} - ${rankList[0]?.points} pts\n2º ${rankList[1]?.name} - ${rankList[1]?.points} pts\n3º ${rankList[2]?.name} - ${rankList[2]?.points} pts`,
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSharing(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -2985,7 +3016,7 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
           .from("usuarios")
           .select("id, nome, apelido")
           .eq("status", "aprovado"),
-        supabase.from("palpites").select("usuario_id, pontos"),
+        supabase.from("palpites").select("usuario_id, pontos").eq("pago", true),
       ]);
       if (!users) {
         setLoadingRank(false);
@@ -2993,11 +3024,16 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
       }
       // Soma pontos por usuário (ignora null = jogo ainda não finalizado)
       const ptsByUser: Record<string, number> = {};
+      const userIdsWithBets = new Set();
+      
       bets?.forEach((b: any) => {
+        userIdsWithBets.add(b.usuario_id);
         if (b.pontos != null)
           ptsByUser[b.usuario_id] = (ptsByUser[b.usuario_id] ?? 0) + b.pontos;
       });
+
       const ranked = users
+        .filter((u: any) => userIdsWithBets.has(u.id))
         .map((u: any) => ({
           id: u.id,
           name: u.apelido ?? u.nome,
@@ -3192,6 +3228,81 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
               </span>
             </div>
           ))}
+      </div>
+    </div>
+
+      <button
+        onClick={handleShareRanking}
+        disabled={sharing || rankList.length === 0}
+        className="w-full py-4 rounded-xl font-black text-sm text-white flex items-center justify-center gap-2.5 transition-all active:scale-95 disabled:opacity-50 mt-2"
+        style={{
+          background: "linear-gradient(135deg,#6366F1 0%,#4F46E5 100%)",
+          boxShadow: "0 4px 20px rgba(99,102,241,0.25)",
+        }}
+      >
+        {sharing ? (
+          <RefreshCw size={16} className="animate-spin" />
+        ) : (
+          <Share2 size={16} />
+        )}
+        {sharing ? "Gerando imagem..." : "Compartilhar Ranking (Top 10)"}
+      </button>
+
+      {/* Hidden Ranking Card for Screenshot */}
+      <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+        <div
+          ref={shareRef}
+          className="p-8 w-[400px]"
+          style={{ background: d ? "#0F172A" : "#FFFFFF", color: T.text(d) }}
+        >
+          <div className="text-center mb-8">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">
+              Bolão dos Clássicos
+            </p>
+            <h2 className="text-2xl font-black tracking-tight">Ranking Geral</h2>
+            <p className="text-amber-400 font-bold text-sm mt-1">Top 10 Participantes</p>
+          </div>
+
+          <div className="space-y-3">
+            {rankList.slice(0, 10).map((p) => (
+              <div
+                key={p.id}
+                className="flex items-center gap-4 px-5 py-4 rounded-2xl border"
+                style={{
+                  background: T.surface(d),
+                  borderColor: T.border(d),
+                }}
+              >
+                <span
+                  className="text-xs font-black w-8 text-center"
+                  style={{ color: p.position <= 3 ? "#FBBF24" : T.textMuted(d) }}
+                >
+                  {p.position}º
+                </span>
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shrink-0"
+                  style={{
+                    background: T.avatarBg(d),
+                    color: T.avatarText(d),
+                    border: `1px solid ${T.border(d)}`,
+                  }}
+                >
+                  {p.name.substring(0, 2).toUpperCase()}
+                </div>
+                <span className="flex-1 font-bold text-sm truncate">{p.name}</span>
+                <span className="font-black text-base text-amber-400">
+                  {p.points} <span className="text-[10px] font-bold opacity-40">PTS</span>
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="mt-8 pt-6 border-t text-center opacity-30"
+            style={{ borderColor: T.border(d) }}
+          >
+            <p className="text-[10px] font-bold">bolao-dos-classicos.vercel.app</p>
+          </div>
         </div>
       </div>
     </div>
@@ -3685,24 +3796,54 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       .eq("status", "aprovado");
     const { data: betsData } = await supabase
       .from("palpites")
-      .select("usuario_id");
+      .select("usuario_id, pago");
     const { data: selMatches } = await supabase
       .from("jogos_selecionados")
       .select("match_id");
 
     const { data: allUsers } = await supabase
       .from("usuarios")
-      .select("id")
+      .select("id, nome, sobrenome, apelido")
       .eq("status", "aprovado");
 
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
     );
+    const userPaidMap: Record<string, boolean> = {};
+    (betsData || []).forEach((b: any) => {
+      if (b.pago) userPaidMap[b.usuario_id] = true;
+    });
+
     setPending(pendUsers || []);
-    setUsers((appUsers || []).filter((u) => usersWithBets.has(u.id)));
+    setUsers((appUsers || [])
+      .filter((u) => usersWithBets.has(u.id))
+      .map(u => ({
+        ...u,
+        isPaid: !!userPaidMap[u.id]
+      }))
+    );
     setTotalBets(betsData?.length || 0);
     setUserTotal(allUsers?.length || 0);
     setSelectedMatchIds((selMatches || []).map((m) => m.match_id));
+    setLoading(false);
+  };
+
+  const togglePayment = async (userId: string, currentPaid: boolean) => {
+    setLoading(true);
+    const { error } = await supabase
+      .from("palpites")
+      .update({ pago: !currentPaid })
+      .eq("usuario_id", userId)
+      .in("match_id", selectedMatchIds);
+    
+    if (error) {
+      alert("Erro ao atualizar pagamento. Verifique se a coluna 'pago' existe na tabela 'palpites'.");
+    }
+    await fetchData();
+    // Se estiver visualizando o usuário, atualiza o objeto local
+    if (selectedUser && selectedUser.id === userId) {
+      setSelectedUser((prev: any) => ({ ...prev, isPaid: !currentPaid }));
+    }
     setLoading(false);
   };
 
@@ -4007,17 +4148,31 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setConfirmDelete(selectedUser)}
-                      className="px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95"
-                      style={{
-                        background: "rgba(248,113,113,0.1)",
-                        color: "#F87171",
-                        border: "1px solid rgba(248,113,113,0.2)",
-                      }}
-                    >
-                      Excluir
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => togglePayment(selectedUser.id, selectedUser.isPaid)}
+                        className="px-4 py-2 rounded-xl text-xs font-black transition-all active:scale-95 flex items-center gap-2"
+                        style={{
+                          background: selectedUser.isPaid ? "rgba(34,197,94,0.1)" : "rgba(251,191,36,0.1)",
+                          color: selectedUser.isPaid ? "#22C55E" : "#FBBF24",
+                          border: `1px solid ${selectedUser.isPaid ? "rgba(34,197,94,0.2)" : "rgba(251,191,36,0.2)"}`,
+                        }}
+                      >
+                        {selectedUser.isPaid ? <CheckCircle2 size={14} /> : <Clock size={14} />}
+                        {selectedUser.isPaid ? "Pago" : "Marcar Pago"}
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(selectedUser)}
+                        className="px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95"
+                        style={{
+                          background: "rgba(248,113,113,0.1)",
+                          color: "#F87171",
+                          border: "1px solid rgba(248,113,113,0.2)",
+                        }}
+                      >
+                        Excluir
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -4065,7 +4220,14 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                         </p>
                       </div>
                     </div>
-                    <ChevronRight size={16} style={{ color: T.textMuted(d) }} />
+                    <div className="flex items-center gap-3">
+                      {u.isPaid ? (
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-500/10 text-emerald-500 text-[9px] font-black uppercase border border-emerald-500/20">Pago</span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-lg bg-amber-500/10 text-amber-500 text-[9px] font-black uppercase border border-amber-500/20">Pendente</span>
+                      )}
+                      <ChevronRight size={16} style={{ color: T.textMuted(d) }} />
+                    </div>
                   </button>
                 ))}
                 {users.length === 0 && (
