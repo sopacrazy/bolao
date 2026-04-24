@@ -1424,17 +1424,7 @@ function Login({
           : "linear-gradient(160deg,#E8EDF5 0%,#F0F4F8 50%,#E8EDF5 100%)",
       }}
     >
-      <button
-        onClick={toggleTheme}
-        className="absolute top-10 right-6 p-2.5 rounded-xl transition-all active:scale-90 z-10"
-        style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
-      >
-        {d ? (
-          <Sun size={16} className="text-amber-400" />
-        ) : (
-          <Moon size={16} className="text-slate-500" />
-        )}
-      </button>
+
 
       <div
         className="absolute -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
