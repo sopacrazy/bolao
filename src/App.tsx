@@ -4641,7 +4641,7 @@ function AnalistaView({
 const tabs = [
   { key: "apostar", label: "Palpites", Icon: Target },
   { key: "ranking", label: "Ranking", Icon: Trophy },
-  { key: "analista", label: "Analista IA", Icon: Bot },
+  // { key: "analista", label: "Analista IA", Icon: Bot },
   { key: "admin", label: "Painel", Icon: Shield, adminOnly: true },
 ] as const;
 
