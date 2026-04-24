@@ -3402,7 +3402,7 @@ function Informativo({ isDark }: { isDark: boolean }) {
   ];
 
   return (
-    <div className="pb-4 space-y-4">
+    <div className="pb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
       {cards.map(({ label, value, sub, color, bg, border, Icon }, i) => (
         <motion.div
           key={label}
@@ -3439,7 +3439,7 @@ function Informativo({ isDark }: { isDark: boolean }) {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.16 }}
-        className="rounded-2xl p-5 border"
+        className="rounded-2xl p-5 border md:col-span-2 lg:col-span-1"
         style={{
           background: "rgba(99,102,241,0.08)",
           borderColor: "rgba(99,102,241,0.15)",
@@ -3757,7 +3757,7 @@ function ManualMatchesAdmin({
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           {matches.map((m) => (
             <div
               key={m.id}
@@ -3990,7 +3990,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div
                 className="p-5 rounded-[2rem] border"
                 style={{ background: T.surface(d), borderColor: T.border(d) }}
@@ -4029,7 +4029,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             </div>
 
             {/* Menu de Navegação do ADM */}
-            <div className="grid grid-cols-1 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {[
                 {
                   key: "bets",
@@ -4096,8 +4096,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="space-y-3"
-          >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {pending.length === 0 ? (
               <div
                 className="py-12 text-center rounded-2xl border border-dashed"
@@ -4244,7 +4243,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 />
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {users.map((u) => (
                   <button
                     key={u.id}
@@ -4837,7 +4836,7 @@ export default function App() {
           borderBottom: `1px solid ${T.border(d)}`,
         }}
       >
-        <div className="flex items-center justify-between max-w-lg mx-auto">
+        <div className={`flex items-center justify-between ${tab === 'admin' ? 'max-w-6xl' : 'max-w-lg'} mx-auto transition-all duration-300`}>
           <div className="flex-1 min-w-0">
             <AnimatePresence mode="wait">
               <motion.div
@@ -5024,7 +5023,7 @@ export default function App() {
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto">
-        <div className="px-4 pt-4 pb-2 max-w-lg mx-auto">
+        <div className={`px-4 pt-4 pb-2 ${tab === 'admin' ? 'max-w-6xl' : 'max-w-lg'} mx-auto transition-all duration-300`}>
           <AnimatePresence mode="wait">
             {tab === "apostar" && (
               <motion.div
