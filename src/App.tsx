@@ -3289,60 +3289,87 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
         {sharing ? "Gerando imagem..." : "Compartilhar Ranking (Top 10)"}
       </button>
 
-      {/* Hidden Ranking Card for Screenshot */}
       <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
         <div
           ref={shareRef}
           className="p-8 w-[400px]"
           style={{ background: d ? "#0F172A" : "#FFFFFF", color: T.text(d) }}
         >
-          <div className="text-center mb-8">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40 mb-1">
+          <div className="text-center mb-10">
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] opacity-40 mb-2">
               Bolão dos Clássicos
             </p>
-            <h2 className="text-2xl font-black tracking-tight">Ranking Geral</h2>
-            <p className="text-amber-400 font-bold text-sm mt-1">Top 10 Participantes</p>
+            <h2 className="text-3xl font-black tracking-tight">Ranking Geral</h2>
+            <p className="text-amber-400 font-bold text-sm mt-1">Liderança da Rodada</p>
           </div>
 
-          <div className="space-y-3">
-            {rankList.slice(0, 10).map((p) => (
+          {/* Podium for Share */}
+          {podium.length > 0 && (
+            <div className="flex items-end justify-center gap-4 mb-10 px-2">
+              {podium.map((p) => {
+                const pos = p.position;
+                const isFirst = pos === 1;
+                return (
+                  <div key={p.id} className="flex flex-col items-center flex-1">
+                    <div className="relative mb-3">
+                      <div 
+                        className={`rounded-full border-2 flex items-center justify-center font-black overflow-hidden
+                          ${isFirst ? "w-20 h-20 text-base" : "w-14 h-14 text-xs"}
+                        `}
+                        style={{ 
+                          background: T.avatarBg(d),
+                          borderColor: isFirst ? "#FBBF24" : T.border(d),
+                          color: T.text(d)
+                        }}
+                      >
+                        {p.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div 
+                        className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border"
+                        style={{ background: podiumCfg[pos-1].color, color: "#000", borderColor: "#FFF" }}
+                      >
+                        {pos}
+                      </div>
+                    </div>
+                    <p className={`font-black truncate w-full text-center ${isFirst ? "text-sm" : "text-[11px]"}`}>{p.name}</p>
+                    <p className="text-amber-400 font-black text-sm">{p.points} <span className="text-[8px] opacity-40">PTS</span></p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* List for Share */}
+          <div className="space-y-2">
+            {rest.slice(0, 7).map((p) => (
               <div
                 key={p.id}
-                className="flex items-center gap-4 px-5 py-4 rounded-2xl border"
+                className="flex items-center gap-4 px-5 py-3.5 rounded-2xl border"
                 style={{
                   background: T.surface(d),
                   borderColor: T.border(d),
                 }}
               >
-                <span
-                  className="text-xs font-black w-8 text-center"
-                  style={{ color: p.position <= 3 ? "#FBBF24" : T.textMuted(d) }}
-                >
-                  {p.position}º
-                </span>
+                <span className="text-xs font-black w-6 opacity-30">{p.position}</span>
                 <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-black shrink-0"
-                  style={{
-                    background: T.avatarBg(d),
-                    color: T.avatarText(d),
-                    border: `1px solid ${T.border(d)}`,
-                  }}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border"
+                  style={{ background: T.avatarBg(d), color: T.avatarText(d), borderColor: T.border(d) }}
                 >
                   {p.name.substring(0, 2).toUpperCase()}
                 </div>
                 <span className="flex-1 font-bold text-sm truncate">{p.name}</span>
-                <span className="font-black text-base text-amber-400">
-                  {p.points} <span className="text-[10px] font-bold opacity-40">PTS</span>
+                <span className="font-black text-sm text-amber-400">
+                  {p.points} <span className="text-[9px] opacity-40">PTS</span>
                 </span>
               </div>
             ))}
           </div>
 
           <div
-            className="mt-8 pt-6 border-t text-center opacity-30"
+            className="mt-10 pt-6 border-t text-center opacity-30"
             style={{ borderColor: T.border(d) }}
           >
-            <p className="text-[10px] font-bold">bolao-dos-classicos.vercel.app</p>
+            <p className="text-[10px] font-bold tracking-widest">bolao-dos-classicos.vercel.app</p>
           </div>
         </div>
       </div>
