@@ -4095,7 +4095,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             key="pending"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {pending.length === 0 ? (
               <div
@@ -4158,6 +4158,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 </motion.div>
               ))
             )}
+            </div>
           </motion.div>
         ) : admTab === "bets" ? (
           <motion.div
