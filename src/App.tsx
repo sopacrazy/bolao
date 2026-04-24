@@ -1417,51 +1417,120 @@ function Login({
 
   return (
     <div
-      className="min-h-[100dvh] flex flex-col items-center justify-center px-6 relative overflow-y-auto transition-colors duration-300"
+      className="min-h-[100dvh] grid grid-cols-1 md:grid-cols-2 transition-colors duration-300"
       style={{
         background: d
           ? "linear-gradient(160deg,#060B14 0%,#0A1428 50%,#060B14 100%)"
           : "linear-gradient(160deg,#E8EDF5 0%,#F0F4F8 50%,#E8EDF5 100%)",
       }}
     >
+      {/* ── Coluna esquerda: Branding (só desktop) ── */}
+      <div
+        className="hidden md:flex flex-col items-center justify-center p-16 relative overflow-hidden"
+        style={{
+          background: "linear-gradient(160deg,#060B14 0%,#0A1428 60%,#080E1C 100%)",
+        }}
+      >
+        {/* Decorative glows */}
+        <div className="absolute top-0 left-0 w-80 h-80 rounded-full pointer-events-none"
+          style={{ background: "radial-gradient(circle,rgba(251,191,36,0.18) 0%,transparent 70%)", transform: "translate(-30%,-30%)" }} />
+        <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full pointer-events-none"
+          style={{ background: "radial-gradient(circle,rgba(99,102,241,0.18) 0%,transparent 70%)", transform: "translate(30%,30%)" }} />
+        <div className="absolute inset-0 pointer-events-none"
+          style={{
+            opacity: 0.04,
+            backgroundImage: "linear-gradient(rgba(255,255,255,0.5) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.5) 1px,transparent 1px)",
+            backgroundSize: "40px 40px",
+          }} />
 
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="relative z-10 flex flex-col items-center text-center gap-8 max-w-sm"
+        >
+          {/* Logo */}
+          <div
+            className="w-28 h-28 rounded-[32px] flex items-center justify-center shadow-2xl"
+            style={{
+              background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)",
+              boxShadow: "0 0 60px rgba(251,191,36,0.4), 0 20px 40px rgba(0,0,0,0.4)",
+            }}
+          >
+            <Swords size={56} className="text-slate-950" />
+          </div>
 
-      <div
-        className="absolute -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none"
-        style={{
-          background: `radial-gradient(circle,${d ? "rgba(251,191,36,0.12)" : "rgba(251,191,36,0.15)"} 0%,transparent 70%)`,
-        }}
-      />
-      <div
-        className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full pointer-events-none"
-        style={{
-          background: `radial-gradient(circle,${d ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)"} 0%,transparent 70%)`,
-        }}
-      />
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          opacity: d ? 0.03 : 0.04,
-          backgroundImage:
-            "linear-gradient(rgba(100,100,100,0.5) 1px,transparent 1px),linear-gradient(90deg,rgba(100,100,100,0.5) 1px,transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
+          {/* Title */}
+          <div className="space-y-3">
+            <p className="text-amber-400 text-xs font-bold tracking-[0.3em] uppercase">
+              Temporada 2025
+            </p>
+            <h1 className="text-5xl font-black leading-tight tracking-tight text-white">
+              Bolão dos<br />
+              <span style={{ background: "linear-gradient(90deg,#FBBF24,#FDE68A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                Clássicos
+              </span>
+            </h1>
+            <p className="text-white/50 text-sm font-medium leading-relaxed">
+              Palpite nos jogos do Campeonato<br />Brasileiro e dispute grandes prêmios
+            </p>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-4 w-full">
+            {[
+              { label: "Participantes", value: String(finance.participants), icon: "👥" },
+              { label: "1º Lugar", value: `R$${Math.round(prizes.first)}`, icon: "🥇" },
+              { label: "2º Lugar", value: `R$${Math.round(prizes.second)}`, icon: "🥈" },
+            ].map(({ label, value, icon }) => (
+              <div
+                key={label}
+                className="rounded-2xl p-4 text-center"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(251,191,36,0.15)" }}
+              >
+                <p className="text-xl mb-1">{icon}</p>
+                <p className="text-white font-black text-sm">{value}</p>
+                <p className="text-white/40 text-[10px] font-medium mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Developer */}
+          <div className="flex items-center gap-2">
+            <p className="text-white/30 text-xs">Desenvolvido por</p>
+            <p className="text-white/60 text-xs font-bold">Adriano Martins</p>
+            <a href="https://wa.me/5591984497134" target="_blank" rel="noopener noreferrer"
+              className="w-6 h-6 rounded-full flex items-center justify-center"
+              style={{ background: "rgba(37,211,102,0.2)", border: "1px solid rgba(37,211,102,0.3)" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="#25D366">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              </svg>
+            </a>
+          </div>
+        </motion.div>
+      </div>
+
+      {/* ── Coluna direita: Formulário ── */}
+      <div className="flex flex-col items-center justify-center px-6 md:px-12 py-10 relative overflow-hidden">
+        {/* Decorative (mobile only) */}
+        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full pointer-events-none md:hidden"
+          style={{ background: `radial-gradient(circle,${d ? "rgba(251,191,36,0.12)" : "rgba(251,191,36,0.15)"} 0%,transparent 70%)` }} />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full pointer-events-none md:hidden"
+          style={{ background: `radial-gradient(circle,${d ? "rgba(99,102,241,0.10)" : "rgba(99,102,241,0.08)"} 0%,transparent 70%)` }} />
 
       <motion.div
         initial={{ opacity: 0, y: 32 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
-        className="relative z-10 w-full max-w-sm space-y-10"
+        className="relative z-10 w-full max-w-sm space-y-8"
       >
-        <div className="text-center space-y-4">
+        {/* Header (mobile only — desktop tem a coluna esquerda) */}
+        <div className="text-center space-y-4 md:hidden">
           <div
-            className="mx-auto w-20 h-20 rounded-[20px] flex items-center justify-center transition-all duration-300"
+            className="mx-auto w-20 h-20 rounded-[20px] flex items-center justify-center"
             style={{
               background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)",
-              boxShadow: d
-                ? "0 0 40px rgba(251,191,36,0.35), 0 8px 24px rgba(0,0,0,0.3)"
-                : "none",
+              boxShadow: d ? "0 0 40px rgba(251,191,36,0.35), 0 8px 24px rgba(0,0,0,0.3)" : "none",
             }}
           >
             <Swords size={36} className="text-slate-950" />
@@ -1470,32 +1539,26 @@ function Login({
             <p className="text-amber-400 text-xs font-bold tracking-[0.25em] uppercase mb-1">
               {mode === "login" ? "Bem-vindo ao" : "Crie sua conta"}
             </p>
-            <h1
-              className="text-3xl font-black leading-tight tracking-tight"
-              style={{ color: T.text(d) }}
-            >
-              Bolão dos
-              <br />
-              <span
-                style={
-                  d
-                    ? {
-                        background: "linear-gradient(90deg,#FBBF24,#FDE68A)",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
-                      }
-                    : { color: "#F59E0B" }
-                }
-              >
+            <h1 className="text-3xl font-black leading-tight tracking-tight" style={{ color: T.text(d) }}>
+              Bolão dos<br />
+              <span style={d ? { background: "linear-gradient(90deg,#FBBF24,#FDE68A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" } : { color: "#F59E0B" }}>
                 Clássicos
               </span>
             </h1>
-            <p className="text-sm mt-2" style={{ color: T.textMuted(d) }}>
-              {mode === "login"
-                ? "Palpite no Campeonato Brasileiro"
-                : "Entre na disputa pelo prêmio"}
-            </p>
           </div>
+        </div>
+
+        {/* Desktop: título reduzido no lado do form */}
+        <div className="hidden md:block">
+          <p className="text-amber-400 text-xs font-bold tracking-[0.25em] uppercase mb-1">
+            {mode === "login" ? "Acesse sua conta" : "Criar nova conta"}
+          </p>
+          <h2 className="text-2xl font-black" style={{ color: T.text(d) }}>
+            {mode === "login" ? "Bem-vindo de volta" : "Junte-se ao bolão"}
+          </h2>
+          <p className="text-sm mt-1" style={{ color: T.textMuted(d) }}>
+            {mode === "login" ? "Entre com seu e-mail ou apelido" : "Preencha seus dados para participar"}
+          </p>
         </div>
 
         <div
@@ -1747,8 +1810,8 @@ function Login({
           </button>
         </div>
 
-        {/* Rodapé do desenvolvedor */}
-        <div className="flex items-center justify-center gap-2 pb-4">
+        {/* Rodapé do desenvolvedor (mobile only) */}
+        <div className="flex items-center justify-center gap-2 md:hidden">
           <p className="text-[11px]" style={{ color: T.textMuted(d) }}>
             Desenvolvido por{" "}
             <span className="font-bold" style={{ color: T.text(d) }}>
@@ -1760,10 +1823,7 @@ function Login({
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center justify-center w-7 h-7 rounded-full transition-all active:scale-90"
-            style={{
-              background: "rgba(37,211,102,0.15)",
-              border: "1px solid rgba(37,211,102,0.3)",
-            }}
+            style={{ background: "rgba(37,211,102,0.15)", border: "1px solid rgba(37,211,102,0.3)" }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="#25D366">
               <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
@@ -1771,6 +1831,7 @@ function Login({
           </a>
         </div>
       </motion.div>
+      </div>{/* fim coluna direita */}
     </div>
   );
 }
@@ -2245,7 +2306,7 @@ function Apostar({
     );
 
   return (
-    <div className="pb-4 space-y-3">
+    <div className="pb-4 space-y-3 flex flex-col">
       {/* ── Navegação de rodadas ── */}
       <div
         className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
@@ -2297,7 +2358,7 @@ function Apostar({
           style={{
             backgroundImage: "url('/assets/flyer.webp')",
             backgroundSize: "cover",
-            backgroundPosition: "center",
+            backgroundPosition: "top center",
             backgroundRepeat: "no-repeat",
             borderColor: T.border(d),
           }}
@@ -2322,6 +2383,7 @@ function Apostar({
         </div>
       )}
       {/* Match cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {activeMatches.map((match, idx) => {
         const sh = activeScores[match.id]?.home ?? "";
         const sa = activeScores[match.id]?.away ?? "";
@@ -2626,6 +2688,7 @@ function Apostar({
           </motion.div>
         );
       })}
+      </div>{/* end grid match cards */}
       {/* Submit — só na rodada atual */}
       {isCurrentRound && openMatches.length > 0 ? (
         <div className="pt-2">
@@ -3810,17 +3873,22 @@ function ManualMatchesAdmin({
 
 function AdminPanel({ isDark }: { isDark: boolean }) {
   const d = isDark;
-  const [admTab, setAdmTab] = useState<"dashboard" | "pending" | "bets" | "jogos">(
+  const [admTab, setAdmTab] = useState<"dashboard" | "pending" | "bets" | "jogos" | "usuarios">(
     "dashboard",
   );
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<any[]>([]);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [totalBets, setTotalBets] = useState(0);
   const [userTotal, setUserTotal] = useState(0);
+  const [editingPasswordUser, setEditingPasswordUser] = useState<any | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   // Controle de jogos selecionados
   const [selectedMatchIds, setSelectedMatchIds] = useState<string[]>([]);
@@ -3859,10 +3927,11 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       .from("jogos_selecionados")
       .select("match_id");
 
-    const { data: allUsers } = await supabase
+    const { data: allUsersData } = await supabase
       .from("usuarios")
-      .select("id, nome, sobrenome, apelido")
-      .eq("status", "aprovado");
+      .select("id, nome, sobrenome, apelido, email, cargo, status")
+      .in("status", ["aprovado", "pendente"])
+      .not("cargo", "like", "dependente:%");
 
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
@@ -3880,8 +3949,9 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
         isPaid: !!userPaidMap[u.id]
       }))
     );
+    setAllUsers(allUsersData || []);
     setTotalBets(betsData?.length || 0);
-    setUserTotal(allUsers?.length || 0);
+    setUserTotal(allUsersData?.filter((u: any) => u.status === "aprovado").length || 0);
     setSelectedMatchIds((selMatches || []).map((m) => m.match_id));
     setLoading(false);
   };
@@ -4052,6 +4122,13 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                   sub: `${selectedMatchIds.length} jogos selecionados`,
                   icon: Gamepad2,
                   color: "text-emerald-400",
+                },
+                {
+                  key: "usuarios",
+                  label: "Gerenciar Usuários",
+                  sub: `${allUsers.length} usuários cadastrados`,
+                  icon: Users,
+                  color: "text-violet-400",
                 },
               ].map((item) => (
                 <button
@@ -4299,7 +4376,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
               </div>
             )}
           </motion.div>
-        ) : (
+        ) : admTab === "jogos" ? (
           <motion.div
             key="jogos"
             initial={{ opacity: 0, y: 10 }}
@@ -4343,7 +4420,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
             </div>
 
             {/* Lista de jogos */}
-            <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {(admMatches ?? []).map((m) => {
                 const isSelected = selectedMatchIds.includes(m.id);
                 const leagueColor = LEAGUES[admLeague]?.color ?? "#64748B";
@@ -4419,6 +4496,152 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 </p>
               )}
             </div>
+          </motion.div>
+        ) : admTab === "usuarios" ? (
+          <motion.div
+            key="usuarios"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-3"
+          >
+            <p className="text-[10px] font-black uppercase tracking-widest opacity-40 px-1" style={{ color: T.text(d) }}>
+              {allUsers.length} usuários cadastrados
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allUsers.map((u) => (
+                <div
+                  key={u.id}
+                  className="p-4 rounded-[1.5rem] border flex items-center justify-between gap-3"
+                  style={{ background: T.surface(d), borderColor: T.border(d) }}
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
+                      style={{ background: "rgba(251,191,36,0.12)", color: "#FBBF24" }}
+                    >
+                      {(u.apelido ?? u.nome ?? "?").substring(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-black text-sm truncate" style={{ color: T.text(d) }}>
+                        {u.apelido ?? u.nome}
+                      </p>
+                      <p className="text-[10px] truncate" style={{ color: T.textMuted(d) }}>
+                        {u.email}
+                      </p>
+                      <span
+                        className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md"
+                        style={{
+                          background: u.status === "aprovado" ? "rgba(34,197,94,0.12)" : "rgba(251,191,36,0.12)",
+                          color: u.status === "aprovado" ? "#22C55E" : "#FBBF24",
+                        }}
+                      >
+                        {u.status}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setEditingPasswordUser(u); setNewPassword(""); setPasswordSuccess(false); }}
+                    className="px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shrink-0"
+                    style={{ background: T.elevated(d), color: T.textMuted(d), border: `1px solid ${T.border(d)}` }}
+                  >
+                    Senha
+                  </button>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* Modal: alterar senha */}
+      <AnimatePresence>
+        {editingPasswordUser && (
+          <motion.div
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setEditingPasswordUser(null)} />
+            <motion.div
+              className="relative z-10 w-full max-w-sm rounded-3xl p-6 space-y-5"
+              style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              transition={{ type: "spring", damping: 28, stiffness: 320 }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-0.5" style={{ color: T.text(d) }}>Alterar senha</p>
+                  <p className="font-black text-lg" style={{ color: T.text(d) }}>
+                    {editingPasswordUser.apelido ?? editingPasswordUser.nome}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: T.textMuted(d) }}>{editingPasswordUser.email}</p>
+                </div>
+                <button
+                  onClick={() => setEditingPasswordUser(null)}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center"
+                  style={{ background: T.elevated(d), border: `1px solid ${T.border(d)}` }}
+                >
+                  <X size={16} style={{ color: T.textMuted(d) }} />
+                </button>
+              </div>
+
+              {passwordSuccess ? (
+                <div className="flex flex-col items-center gap-3 py-4 text-center">
+                  <div className="w-14 h-14 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                    <CheckCircle2 size={28} className="text-emerald-400" />
+                  </div>
+                  <p className="font-black text-sm text-emerald-400">Senha alterada!</p>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: T.textMuted(d) }}>
+                      <Shield size={16} />
+                    </span>
+                    <input
+                      type="password"
+                      placeholder="Nova senha"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full pl-10 pr-4 py-3.5 rounded-xl font-medium outline-none transition-all text-sm"
+                      style={{ background: T.inputBg(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setEditingPasswordUser(null)}
+                      className="flex-1 py-3 rounded-xl font-bold text-sm"
+                      style={{ background: T.elevated(d), color: T.textMuted(d), border: `1px solid ${T.border(d)}` }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      disabled={!newPassword.trim() || savingPassword}
+                      onClick={async () => {
+                        if (!newPassword.trim()) return;
+                        setSavingPassword(true);
+                        const { error } = await supabase
+                          .from("usuarios")
+                          .update({ senha: newPassword.trim() })
+                          .eq("id", editingPasswordUser.id);
+                        setSavingPassword(false);
+                        if (!error) {
+                          setPasswordSuccess(true);
+                          setTimeout(() => setEditingPasswordUser(null), 1500);
+                        }
+                      }}
+                      className="flex-1 py-3 rounded-xl font-black text-sm transition-all active:scale-95 disabled:opacity-40"
+                      style={{ background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)", color: "#0C1120" }}
+                    >
+                      {savingPassword ? "Salvando..." : "Salvar"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -4542,62 +4765,102 @@ function UserBetsList({
     );
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p
         className="text-[10px] font-bold uppercase tracking-widest px-1"
         style={{ color: T.textMuted(d) }}
       >
         Palpites Registrados
       </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
       {roundMatches.map((m) => {
-        const bet = bets.find((b) => b.match_id === m.id);
+        const bet = bets.find((b: any) => b.match_id === m.id);
+        const hasBet = !!bet;
         return (
           <div
             key={m.id}
-            className="p-4 rounded-2xl border flex items-center justify-between gap-4"
-            style={{ background: T.surface(d), borderColor: T.border(d) }}
+            className="rounded-2xl border overflow-hidden"
+            style={{
+              background: T.surface(d),
+              borderColor: hasBet ? "rgba(251,191,36,0.25)" : T.border(d),
+            }}
           >
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <img src={m.homeLogo} className="w-6 h-6 object-contain" alt="" />
-              <span
-                className="text-xs font-bold truncate"
-                style={{ color: T.text(d) }}
-              >
-                {m.home}
-              </span>
+            <div className="px-4 pt-3 pb-1">
+              <span className="text-[10px]" style={{ color: T.textMuted(d) }}>{fmtDate(m.date)}</span>
+            </div>
+            <div className="flex items-center px-4 pb-4 pt-2 gap-3">
+              {/* Home */}
+              <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
+                <div
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center overflow-hidden"
+                  style={{ background: T.avatarBg(d), border: `1px solid ${T.border(d)}` }}
+                >
+                  {m.homeLogo ? (
+                    <img src={m.homeLogo} className="w-8 h-8 object-contain" alt="" />
+                  ) : (
+                    <span className="text-xs font-black" style={{ color: T.text(d) }}>{m.home}</span>
+                  )}
+                </div>
+                <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: T.text(d) }}>
+                  {m.homeName}
+                </span>
+              </div>
+
+              {/* Score */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black"
+                  style={{
+                    background: hasBet ? "rgba(251,191,36,0.1)" : T.elevated(d),
+                    border: `1.5px solid ${hasBet ? "rgba(251,191,36,0.3)" : T.inputBdr(d)}`,
+                    color: hasBet ? "#FBBF24" : T.textMuted(d),
+                  }}
+                >
+                  {hasBet ? bet.gols_home : "—"}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: T.textMuted(d) }} />
+                </div>
+                <div
+                  className="w-11 h-11 rounded-xl flex items-center justify-center text-xl font-black"
+                  style={{
+                    background: hasBet ? "rgba(251,191,36,0.1)" : T.elevated(d),
+                    border: `1.5px solid ${hasBet ? "rgba(251,191,36,0.3)" : T.inputBdr(d)}`,
+                    color: hasBet ? "#FBBF24" : T.textMuted(d),
+                  }}
+                >
+                  {hasBet ? bet.gols_away : "—"}
+                </div>
+              </div>
+
+              {/* Away */}
+              <div className="flex flex-col items-center gap-1.5 flex-1 min-w-0">
+                <div
+                  className="w-12 h-12 rounded-2xl flex items-center justify-center overflow-hidden"
+                  style={{ background: T.avatarBg(d), border: `1px solid ${T.border(d)}` }}
+                >
+                  {m.awayLogo ? (
+                    <img src={m.awayLogo} className="w-8 h-8 object-contain" alt="" />
+                  ) : (
+                    <span className="text-xs font-black" style={{ color: T.text(d) }}>{m.away}</span>
+                  )}
+                </div>
+                <span className="text-[10px] font-bold truncate w-full text-center" style={{ color: T.text(d) }}>
+                  {m.awayName}
+                </span>
+              </div>
             </div>
 
-            <div
-              className="flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-xl"
-              style={{ background: T.elevated(d) }}
-            >
-              <span
-                className="font-black text-sm"
-                style={{ color: bet ? T.text(d) : T.textMuted(d) }}
-              >
-                {bet ? bet.gols_home : "-"}
-              </span>
-              <span className="text-[10px] opacity-30">×</span>
-              <span
-                className="font-black text-sm"
-                style={{ color: bet ? T.text(d) : T.textMuted(d) }}
-              >
-                {bet ? bet.gols_away : "-"}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
-              <span
-                className="text-xs font-bold truncate text-right"
-                style={{ color: T.text(d) }}
-              >
-                {m.away}
-              </span>
-              <img src={m.awayLogo} className="w-6 h-6 object-contain" alt="" />
-            </div>
+            {!hasBet && (
+              <div className="px-4 pb-3">
+                <p className="text-[10px] text-center" style={{ color: T.textMuted(d) }}>Sem palpite</p>
+              </div>
+            )}
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -4806,7 +5069,18 @@ export default function App() {
           if (savedUser) {
             const u = JSON.parse(savedUser);
             setUser(u);
+            setActiveProfile(u);
             setIsDark(u.dark_mode === true);
+            supabase
+              .from("usuarios")
+              .select("*")
+              .eq("cargo", `dependente:${u.id}`)
+              .eq("status", "aprovado")
+              .then(({ data }) => {
+                const allProfiles = [u, ...(data || [])];
+                setProfiles(allProfiles);
+                fetchProfileBetStatus(allProfiles.map((p: any) => p.id));
+              });
           }
           setAuth(true);
         }}
@@ -4823,21 +5097,133 @@ export default function App() {
       : headerContent[tab].title;
   const sub = headerContent[tab].sub;
 
+  const isAdmin = user?.cargo?.toLowerCase() === "adm";
+
   return (
     <div
-      className="h-[100dvh] flex flex-col font-sans transition-colors duration-300"
+      className="h-[100dvh] flex flex-col md:flex-row font-sans transition-colors duration-300"
       style={{ background: T.bg(d) }}
     >
-      {/* Header */}
+      {/* ── Sidebar desktop ── */}
+      <aside
+        className="hidden md:flex flex-col shrink-0 w-56 h-full z-20 transition-colors duration-300"
+        style={{
+          background: T.headerBg(d),
+          borderRight: `1px solid ${T.border(d)}`,
+        }}
+      >
+        {/* Logo */}
+        <div className="px-5 py-6 flex items-center gap-3 shrink-0">
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: "linear-gradient(135deg,#FBBF24 0%,#F59E0B 100%)" }}
+          >
+            <Swords size={18} className="text-slate-950" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-black text-[13px] leading-tight truncate" style={{ color: T.text(d) }}>
+              Bolão dos
+            </p>
+            <p className="font-black text-[13px] leading-tight text-amber-400 truncate">
+              Clássicos
+            </p>
+          </div>
+        </div>
+
+        {/* User card */}
+        <div
+          className="mx-3 mb-5 p-3 rounded-2xl"
+          style={{ background: T.surface(d), border: `1px solid ${T.border(d)}` }}
+        >
+          <div className="flex items-center gap-2.5">
+            <div
+              className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
+              style={{ background: "rgba(251,191,36,0.15)", color: "#FBBF24" }}
+            >
+              {(activeProfile?.apelido ?? activeProfile?.nome ?? "U").substring(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-black text-xs truncate" style={{ color: T.text(d) }}>
+                {activeProfile?.apelido ?? activeProfile?.nome ?? "Jogador"}
+              </p>
+              <span
+                className="text-[10px] font-black px-1.5 py-0.5 rounded-md"
+                style={{
+                  background: totalUserPoints > 0 ? "rgba(251,191,36,0.15)" : d ? "rgba(255,255,255,0.07)" : "rgba(0,0,0,0.07)",
+                  color: totalUserPoints > 0 ? "#FBBF24" : T.textMuted(d),
+                }}
+              >
+                {totalUserPoints} pts
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav items */}
+        <nav className="flex-1 px-3 space-y-1 overflow-y-auto">
+          {tabs.map(({ key, label, Icon, adminOnly }: any) => {
+            if (adminOnly && !isAdmin) return null;
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key as Tab)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left"
+                style={{
+                  background: active ? (d ? "rgba(251,191,36,0.12)" : "rgba(251,191,36,0.1)") : "transparent",
+                  border: active ? `1px solid rgba(251,191,36,0.25)` : "1px solid transparent",
+                  color: active ? "#FBBF24" : T.textMuted(d),
+                }}
+              >
+                <Icon size={17} strokeWidth={active ? 2.5 : 1.8} />
+                <span className="font-bold text-sm">{label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Bottom actions */}
+        <div className="px-3 pb-6 pt-3 space-y-1 border-t shrink-0" style={{ borderColor: T.border(d) }}>
+          <button
+            onClick={() => setShowStandings(true)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+            style={{ color: T.textMuted(d) }}
+          >
+            <List size={17} strokeWidth={1.8} />
+            <span className="font-bold text-sm">Classificação</span>
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+            style={{ color: T.textMuted(d) }}
+          >
+            {d ? <Sun size={17} strokeWidth={1.8} /> : <Moon size={17} strokeWidth={1.8} />}
+            <span className="font-bold text-sm">{d ? "Tema claro" : "Tema escuro"}</span>
+          </button>
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all"
+            style={{ color: T.textMuted(d) }}
+          >
+            <LogOut size={17} strokeWidth={1.8} />
+            <span className="font-bold text-sm">Sair</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Content column (header + main + nav) ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+
+      {/* Header — mobile only */}
       <header
-        className="shrink-0 px-5 pt-10 pb-4 z-10 transition-colors duration-300"
+        className="md:hidden shrink-0 px-5 pt-10 pb-4 z-10 transition-colors duration-300"
         style={{
           background: T.headerBg(d),
           backdropFilter: "blur(20px)",
           borderBottom: `1px solid ${T.border(d)}`,
         }}
       >
-        <div className={`flex items-center justify-between ${tab === 'admin' ? 'max-w-6xl' : 'max-w-lg'} mx-auto transition-all duration-300`}>
+        <div className={`flex items-center justify-between ${tab === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto transition-all duration-300`}>
           <div className="flex-1 min-w-0">
             <AnimatePresence mode="wait">
               <motion.div
@@ -5024,7 +5410,7 @@ export default function App() {
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto">
-        <div className={`px-4 pt-4 pb-2 ${tab === 'admin' ? 'max-w-6xl' : 'max-w-lg'} mx-auto transition-all duration-300`}>
+        <div className={`px-4 pt-4 pb-2 ${tab === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto transition-all duration-300`}>
           <AnimatePresence mode="wait">
             {tab === "apostar" && (
               <motion.div
@@ -5082,9 +5468,9 @@ export default function App() {
         </div>
       </main>
 
-      {/* Bottom nav */}
+      {/* Bottom nav — mobile only */}
       <nav
-        className="shrink-0 z-50 transition-colors duration-300"
+        className="md:hidden shrink-0 z-50 transition-colors duration-300"
         style={{
           background: T.navBg(d),
           backdropFilter: "blur(20px)",
@@ -5133,6 +5519,8 @@ export default function App() {
           })}
         </div>
       </nav>
+
+      </div>{/* end content column */}
 
       {/* Classificação Brasileirão */}
       {showStandings && (
