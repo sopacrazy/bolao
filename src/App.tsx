@@ -4706,6 +4706,7 @@ export default function App() {
 
   const [profiles, setProfiles] = useState<any[]>([]);
   const [activeProfile, setActiveProfile] = useState<any>(null);
+  const [profilesWithBets, setProfilesWithBets] = useState<Set<string>>(new Set());
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showAddProfile, setShowAddProfile] = useState(false);
   const [newProfileName, setNewProfileName] = useState("");
@@ -4714,6 +4715,25 @@ export default function App() {
   const [profileToDelete, setProfileToDelete] = useState<any>(null);
   const [deletingProfile, setDeletingProfile] = useState(false);
   const [showUserSettings, setShowUserSettings] = useState(false);
+
+  const fetchProfileBetStatus = async (pIds: string[]) => {
+    try {
+      const { data: sel } = await supabase.from("jogos_selecionados").select("match_id");
+      const matchIds = (sel || []).map(m => m.match_id);
+      
+      if (matchIds.length > 0) {
+        const { data: bets } = await supabase
+          .from("palpites")
+          .select("usuario_id")
+          .in("usuario_id", pIds)
+          .in("match_id", matchIds);
+        
+        setProfilesWithBets(new Set(bets?.map(b => b.usuario_id)));
+      }
+    } catch (err) {
+      console.error("Error fetching profile bet status:", err);
+    }
+  };
 
   useEffect(() => {
     const savedUser = localStorage.getItem("bolao_user");
@@ -4730,11 +4750,9 @@ export default function App() {
         .eq("cargo", `dependente:${u.id}`)
         .eq("status", "aprovado")
         .then(({ data }) => {
-          if (data) {
-            setProfiles([u, ...data]);
-          } else {
-            setProfiles([u]);
-          }
+          const allProfiles = [u, ...(data || [])];
+          setProfiles(allProfiles);
+          fetchProfileBetStatus(allProfiles.map(p => p.id));
         });
     }
     // Esconde a splash screen nativa assim que o app carregar
@@ -4858,10 +4876,15 @@ export default function App() {
                                 <span className="font-bold text-sm" style={{ color: T.text(d) }}>
                                   {p.apelido ?? p.nome}
                                 </span>
-                                {activeProfile?.id === p.id && (
-                                  <CheckCircle2 size={16} className="text-amber-500" />
-                                )}
-                              </button>
+                                  <div className="flex items-center gap-2">
+                                    {profilesWithBets.has(p.id) && (
+                                      <Target size={14} className="text-amber-500/50" />
+                                    )}
+                                    {activeProfile?.id === p.id && (
+                                      <CheckCircle2 size={16} className="text-amber-500" />
+                                    )}
+                                  </div>
+                                </button>
                             ))}
                             <div className="my-1 border-t" style={{ borderColor: T.border(d) }} />
                             <button
