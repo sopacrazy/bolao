@@ -3046,7 +3046,11 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
     })();
   }, []);
 
-  const top3 = rankList.slice(0, 3);
+  const podium = [];
+  if (rankList.length >= 2) podium.push(rankList[1]); // 2nd
+  if (rankList.length >= 1) podium.push(rankList[0]); // 1st
+  if (rankList.length >= 3) podium.push(rankList[2]); // 3rd
+
   const rest = rankList.slice(3);
   const me = rankList.find((p) => p.id === user?.id);
 
@@ -3064,132 +3068,169 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
     );
 
   return (
-    <div className="pb-4 space-y-4">
-      {top3.length > 0 && (
-        <div className="grid grid-cols-3 gap-2">
-          {top3.map((p, i) => {
-            const { icon: Icon, color, bg, border } = podiumCfg[i];
-            const isMe = p.id === user?.id;
-            return (
-              <motion.div
-                key={p.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className="rounded-2xl p-3 flex flex-col items-center text-center gap-2"
-                style={{
-                  background: isMe ? "rgba(251,191,36,0.12)" : bg,
-                  border: `1px solid ${isMe ? "rgba(251,191,36,0.3)" : border}`,
-                }}
-              >
-                <Icon size={20} style={{ color }} fill={color} />
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center font-black text-xs"
-                  style={{
-                    background: d
-                      ? "rgba(255,255,255,0.08)"
-                      : "rgba(0,0,0,0.06)",
-                    color: T.text(d),
-                  }}
+    <div className="pb-4 space-y-6">
+      {/* Premium Podium */}
+      {podium.length > 0 && (
+        <div 
+          className="rounded-[32px] p-6 mb-4 relative overflow-hidden border"
+          style={{ 
+            background: T.surface(d), 
+            borderColor: T.border(d),
+            boxShadow: d ? "none" : "0 10px 40px -10px rgba(0,0,0,0.05)"
+          }}
+        >
+          <div className="flex items-end justify-center gap-2 sm:gap-4 pt-4">
+            {podium.map((p) => {
+              const pos = p.position; // 1, 2, or 3
+              const config = podiumCfg[pos - 1];
+              const isFirst = pos === 1;
+              const isMe = p.id === user?.id;
+
+              return (
+                <motion.div
+                  key={p.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: pos * 0.1 }}
+                  className="flex flex-col items-center flex-1 min-w-0"
                 >
-                  {p.name.substring(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <p
-                    className="font-bold text-xs leading-tight truncate w-full"
-                    style={{ color: T.text(d) }}
-                  >
-                    {p.name}
-                    {isMe ? " ★" : ""}
-                  </p>
-                  <p className="font-black text-sm mt-0.5" style={{ color }}>
-                    {p.points}
-                  </p>
-                  <p className="text-[9px]" style={{ color: T.textMuted(d) }}>
-                    pts
-                  </p>
-                </div>
-              </motion.div>
-            );
-          })}
+                  <div className="relative mb-3">
+                    {/* Avatar Container */}
+                    <div 
+                      className={`rounded-full flex items-center justify-center font-black relative z-10 overflow-hidden border-2
+                        ${isFirst ? "w-20 h-20 text-base" : "w-14 h-14 text-xs"}
+                      `}
+                      style={{ 
+                        background: isMe ? "rgba(251,191,36,0.1)" : T.avatarBg(d),
+                        borderColor: isFirst ? "#FBBF24" : isMe ? "rgba(251,191,36,0.4)" : T.border(d),
+                        color: isMe ? "#FBBF24" : T.text(d)
+                      }}
+                    >
+                      {p.name.substring(0, 2).toUpperCase()}
+                    </div>
+                    
+                    {/* Rank Badge */}
+                    <div 
+                      className="absolute -bottom-1 left-1/2 -translate-x-1/2 z-20 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black border shadow-sm"
+                      style={{ 
+                        background: config.color,
+                        borderColor: "white",
+                        color: "#000"
+                      }}
+                    >
+                      {pos}
+                    </div>
+                  </div>
+
+                  <div className="text-center w-full">
+                    <p 
+                      className={`font-black truncate px-1 ${isFirst ? "text-sm" : "text-[11px]"}`}
+                      style={{ color: T.text(d) }}
+                    >
+                      {p.name}
+                    </p>
+                    <div className="flex items-center justify-center gap-1 mt-0.5">
+                      <span 
+                        className={`font-black ${isFirst ? "text-base" : "text-sm"}`}
+                        style={{ color: isFirst ? "#FBBF24" : T.text(d) }}
+                      >
+                        {p.points}
+                      </span>
+                      <Flame size={isFirst ? 12 : 10} className="text-amber-500" />
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
       )}
 
+      {/* Your Position Highlight */}
       {me && me.position > 3 && (
         <div
-          className="rounded-xl p-4 flex items-center gap-3 border"
+          className="rounded-2xl p-4 flex items-center gap-4 border"
           style={{
             background: "rgba(251,191,36,0.07)",
             borderColor: "rgba(251,191,36,0.2)",
           }}
         >
-          <Flame size={16} className="text-amber-400 shrink-0" />
+          <div 
+            className="w-10 h-10 rounded-full bg-amber-400/20 flex items-center justify-center text-amber-500 font-black text-sm"
+          >
+            {me.position}º
+          </div>
           <div className="flex-1">
-            <p className="text-amber-400 text-xs font-bold">Sua posição</p>
-            <p className="font-black text-sm" style={{ color: T.text(d) }}>
-              {me.position}º lugar • {me.points} pts
+            <p className="text-amber-500 text-[10px] font-black uppercase tracking-widest">Sua posição</p>
+            <p className="font-bold text-sm" style={{ color: T.text(d) }}>
+              Você está em {me.position}º lugar
             </p>
           </div>
-          <ChevronRight size={16} style={{ color: T.textMuted(d) }} />
+          <div className="text-right">
+            <p className="font-black text-lg text-amber-500">{me.points}</p>
+            <p className="text-[9px] font-bold opacity-40 uppercase" style={{ color: T.text(d) }}>Pontos</p>
+          </div>
         </div>
       )}
 
-      <div className="space-y-1.5">
+      {/* List Content */}
+      <div 
+        className="rounded-[32px] overflow-hidden border"
+        style={{ background: T.surface(d), borderColor: T.border(d) }}
+      >
         {rest.map((p, i) => {
           const isMe = p.id === user?.id;
           return (
             <motion.div
               key={p.id}
-              initial={{ opacity: 0, x: -8 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.24 + i * 0.02 }}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl"
-              style={{
-                background: isMe ? "rgba(251,191,36,0.08)" : T.rankItem(d),
-                border: `1px solid ${isMe ? "rgba(251,191,36,0.2)" : T.rankBdr(d)}`,
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.1 + i * 0.03 }}
+              className="flex items-center gap-4 px-6 py-4 relative"
+              style={{ 
+                borderBottom: i === rest.length - 1 ? "none" : `1px solid ${T.border(d)}`,
+                background: isMe ? "rgba(251,191,36,0.03)" : "transparent"
               }}
             >
-              <span
-                className="text-xs font-black w-7 text-center shrink-0"
-                style={{ color: isMe ? "#FBBF24" : T.textMuted(d) }}
+              <span 
+                className="text-xs font-black w-6 opacity-40"
+                style={{ color: T.text(d) }}
               >
-                {p.position}º
+                {p.position}
               </span>
-              <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"
-                style={{
-                  background: isMe ? "rgba(251,191,36,0.15)" : T.avatarBg(d),
+              
+              <div 
+                className="w-10 h-10 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border"
+                style={{ 
+                  background: isMe ? "rgba(251,191,36,0.1)" : T.avatarBg(d),
                   color: isMe ? "#FBBF24" : T.avatarText(d),
+                  borderColor: isMe ? "rgba(251,191,36,0.3)" : T.border(d)
                 }}
               >
                 {p.name.substring(0, 2).toUpperCase()}
               </div>
-              <span
-                className="flex-1 text-sm font-medium truncate"
-                style={{ color: isMe ? "#FBBF24" : T.text(d) }}
+
+              <span 
+                className="flex-1 text-sm font-bold truncate"
+                style={{ color: T.text(d) }}
               >
                 {p.name}
-                {isMe && " (Você)"}
+                {isMe && <span className="ml-2 text-[10px] text-amber-500 opacity-60">(Você)</span>}
               </span>
-              <span
-                className="font-black text-sm shrink-0"
-                style={{ color: isMe ? "#FBBF24" : T.text(d) }}
-              >
-                {p.points}{" "}
-                <span
-                  className="text-xs font-normal"
-                  style={{ color: T.textMuted(d) }}
-                >
-                  pts
+
+              <div className="flex items-center gap-1.5">
+                <span className="font-black text-sm" style={{ color: T.text(d) }}>
+                  {p.points}
                 </span>
-              </span>
+                <Flame size={12} className="text-amber-500 opacity-40" />
+              </div>
             </motion.div>
           );
         })}
       </div>
 
       <div
-        className="rounded-2xl p-5 space-y-3 mt-2 border"
+        className="rounded-[32px] p-6 space-y-4 border"
         style={{ background: T.surface(d), borderColor: T.border(d) }}
       >
         <p
