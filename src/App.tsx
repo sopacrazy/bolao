@@ -2156,7 +2156,11 @@ function Apostar({
 
   const activeMatches = MOCK_TEST ? mockMatches : matches;
   const activeScores = MOCK_TEST ? mockScores : scores;
-  const activeIsLocked = MOCK_TEST ? true : isLocked;
+  // Bloqueia envio assim que qualquer jogo da rodada sair de "Agendado"
+  const roundStarted = isCurrentRound && activeMatches.some(
+    (m) => m.status !== "STATUS_SCHEDULED"
+  );
+  const activeIsLocked = MOCK_TEST ? true : (isLocked || roundStarted);
   // ── fim MOCK TEST ──────────────────────────────────────────────────────────
 
   // Salva pontos no banco quando jogos finalizam (roda a cada refresh do ESPN ~90s)
@@ -2811,7 +2815,7 @@ function Apostar({
       {isCurrentRound && openMatches.length > 0 ? (
         <div className="pt-2">
           <AnimatePresence mode="wait">
-            {activeIsLocked ? (
+            {isLocked ? (
               <div className="space-y-2">
                 <motion.div
                   key="locked"
@@ -2845,6 +2849,20 @@ function Apostar({
                     : "Preparando imagem..."}
                 </button>
               </div>
+            ) : roundStarted ? (
+              <motion.div
+                key="closed"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full py-4 rounded-xl flex items-center justify-center gap-2 font-bold text-sm border"
+                style={{
+                  background: d ? "rgba(248,113,113,0.07)" : "rgba(239,68,68,0.07)",
+                  borderColor: "rgba(248,113,113,0.25)",
+                  color: "#F87171",
+                }}
+              >
+                <Shield size={16} /> Prazo encerrado — rodada em andamento
+              </motion.div>
             ) : (
               <button
                 key="btn"
