@@ -278,16 +278,33 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
       let result: RodadaData;
 
       if (isCurrent) {
-        // Endpoint ao vivo primeiro — sempre tem placares atualizados
-        const res = await fetch(espnBase(league));
-        const json = await res.json();
-        const { events, roundNumber } = filterNextRound(json.events ?? [], true);
-        result = { matches: parseMatches(events), roundNumber };
+        // Busca a rodada completa pelo range de datas (inclui jogos de todos os dias da rodada)
+        const future = new Date(anchor.getTime() + 30 * 86400000);
+        result = await espnDateRange(anchor, future, league, true);
 
-        // Fallback ao range de datas (para rodadas futuras ainda não no scoreboard ao vivo)
+        // Sobrepõe placares ao vivo do scoreboard ESPN (mais atualizado para jogos em andamento)
+        try {
+          const liveRes = await fetch(espnBase(league));
+          const liveJson = await liveRes.json();
+          const liveEvents: any[] = liveJson.events ?? [];
+          if (liveEvents.length > 0) {
+            const liveById = new Map(liveEvents.map((ev: any) => [ev.id, ev]));
+            result = {
+              ...result,
+              matches: result.matches.map(m => {
+                const liveEv = liveById.get(m.id);
+                return liveEv ? parseMatches([liveEv])[0] : m;
+              }),
+            };
+          }
+        } catch {}
+
+        // Fallback: se range de datas não retornou nada, usa só o live
         if (result.matches.length === 0) {
-          const future = new Date(anchor.getTime() + 30 * 86400000);
-          result = await espnDateRange(anchor, future, league, true);
+          const res = await fetch(espnBase(league));
+          const json = await res.json();
+          const { events, roundNumber } = filterNextRound(json.events ?? [], true);
+          result = { matches: parseMatches(events), roundNumber };
         }
       } else {
         // Histórico: janela de 8 dias centrada no anchor
