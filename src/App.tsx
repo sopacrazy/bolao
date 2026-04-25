@@ -2205,7 +2205,13 @@ function Apostar({
       }
     : {};
 
-  const activeMatches = MOCK_TEST ? mockMatches : matches;
+  // Enriquece matches com resultados salvos no banco (cobre falhas de API)
+  const mergedMatches = MOCK_TEST ? matches : matches.map(m => {
+    if (m.homeScore !== "-" || !dbResults[m.id]) return m;
+    const db = dbResults[m.id];
+    return { ...m, homeScore: db.homeScore, awayScore: db.awayScore, status: "STATUS_FINAL" };
+  });
+  const activeMatches = MOCK_TEST ? mockMatches : mergedMatches;
   const activeScores = MOCK_TEST ? mockScores : scores;
   // Bloqueia envio assim que qualquer jogo da rodada sair de "Agendado"
   const roundStarted = isCurrentRound && activeMatches.some(
@@ -2213,6 +2219,46 @@ function Apostar({
   );
   const activeIsLocked = MOCK_TEST ? true : (isLocked || roundStarted);
   // ── fim MOCK TEST ──────────────────────────────────────────────────────────
+
+  // ── Resultados da rodada no banco ──────────────────────────────────────────
+  const [dbResults, setDbResults] = useState<Record<string, { homeScore: string; awayScore: string }>>({});
+
+  useEffect(() => {
+    supabase
+      .from("resultados_rodada")
+      .select("match_id, home_score, away_score")
+      .then(({ data }) => {
+        if (!data) return;
+        const map: Record<string, { homeScore: string; awayScore: string }> = {};
+        data.forEach((r: any) => { map[r.match_id] = { homeScore: r.home_score, awayScore: r.away_score }; });
+        setDbResults(map);
+      });
+  }, []);
+
+  // Salva jogos encerrados com placar válido na tabela resultados_rodada
+  useEffect(() => {
+    if (MOCK_TEST || !matches.length) return;
+    const roundNum = String(espn.data?.roundNumber ?? seriec.data?.roundNumber ?? "");
+    const finalMatches = matches.filter(m => m.status === "STATUS_FINAL" && m.homeScore !== "-" && m.awayScore !== "-");
+    if (!finalMatches.length) return;
+    supabase.from("resultados_rodada").upsert(
+      finalMatches.map(m => ({
+        match_id: m.id,
+        home_team: m.home,
+        away_team: m.away,
+        home_name: m.homeName,
+        away_name: m.awayName,
+        home_logo: m.homeLogo,
+        away_logo: m.awayLogo,
+        home_score: m.homeScore,
+        away_score: m.awayScore,
+        match_date: m.date,
+        league: m.league ?? "bra.1",
+        round_number: roundNum,
+      })),
+      { onConflict: "match_id" }
+    );
+  }, [matches]);
 
   // Salva pontos no banco quando jogos finalizam (roda a cada refresh do ESPN ~90s)
   useEffect(() => {
@@ -4063,6 +4109,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   const [admTab, setAdmTab] = useState<"dashboard" | "pending" | "bets" | "jogos" | "usuarios">(
     "dashboard",
   );
+  const [clearingResults, setClearingResults] = useState(false);
+  const [resultsCount, setResultsCount] = useState(0);
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -4140,6 +4188,12 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     setTotalBets(betsData?.length || 0);
     setUserTotal(allUsersData?.filter((u: any) => u.status === "aprovado").length || 0);
     setSelectedMatchIds((selMatches || []).map((m) => m.match_id));
+
+    const { count } = await supabase
+      .from("resultados_rodada")
+      .select("match_id", { count: "exact", head: true });
+    setResultsCount(count ?? 0);
+
     setLoading(false);
   };
 
@@ -4352,6 +4406,35 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                   <ChevronRight size={16} className="opacity-20" />
                 </button>
               ))}
+
+              {/* Zerar resultados da rodada */}
+              <button
+                onClick={async () => {
+                  if (resultsCount === 0) return;
+                  if (!confirm(`Zerar os ${resultsCount} resultados salvos da rodada?`)) return;
+                  setClearingResults(true);
+                  await supabase.from("resultados_rodada").delete().neq("match_id", "");
+                  setResultsCount(0);
+                  setClearingResults(false);
+                }}
+                disabled={resultsCount === 0 || clearingResults}
+                className="flex items-center gap-4 p-4 rounded-[2rem] border transition-all active:scale-[0.98] disabled:opacity-40"
+                style={{ background: resultsCount > 0 ? "rgba(239,68,68,0.06)" : T.surface(d), borderColor: resultsCount > 0 ? "rgba(239,68,68,0.2)" : T.border(d) }}
+              >
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/5 border" style={{ borderColor: T.border(d) }}>
+                  {clearingResults
+                    ? <RefreshCw size={20} className="animate-spin text-red-400" />
+                    : <Trash2 size={20} className={resultsCount > 0 ? "text-red-400" : "text-slate-500"} />}
+                </div>
+                <div className="text-left flex-1 min-w-0">
+                  <p className="font-bold text-sm" style={{ color: resultsCount > 0 ? "#F87171" : T.textMuted(d) }}>
+                    Zerar Resultados da Rodada
+                  </p>
+                  <p className="text-[10px] opacity-50" style={{ color: T.text(d) }}>
+                    {resultsCount > 0 ? `${resultsCount} jogos salvos no banco` : "Nenhum resultado salvo"}
+                  </p>
+                </div>
+              </button>
             </div>
           </motion.div>
         ) : admTab === "pending" ? (
