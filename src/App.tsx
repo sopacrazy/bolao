@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Trophy,
@@ -247,8 +247,8 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const load = async (force = false) => {
-    setLoading(true);
+  const load = async (force = false, silent = false) => {
+    if (!silent) setLoading(true);
     setError(false);
     const cacheKey = `${CACHE_KEY}_${league}_${anchorTs}`;
 
@@ -325,7 +325,7 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
     return () => clearInterval(id);
   }, [data]);
 
-  return { data, loading, error, refetch: () => load(true) };
+  return { data, loading, error, refetch: () => load(true), silentRefetch: () => load(true, true) };
 }
 
 // ─── TheSportsDB — Série C ───────────────────────────────────────────────────
@@ -386,8 +386,8 @@ function useSerieCRodada(showPast: boolean) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  const load = async (force = false) => {
-    setLoading(true);
+  const load = async (force = false, silent = false) => {
+    if (!silent) setLoading(true);
     setError(false);
     const cacheKey = `${TSDB_CACHE}_${showPast ? "past" : "next"}_v2`;
 
@@ -465,7 +465,7 @@ function useSerieCRodada(showPast: boolean) {
     return () => clearInterval(id);
   }, [data]);
 
-  return { data, loading, error, refetch: () => load(true) };
+  return { data, loading, error, refetch: () => load(true), silentRefetch: () => load(true, true) };
 }
 
 // ─── Static ranking + finance (unchanged) ────────────────────────────────────
@@ -1917,6 +1917,35 @@ function Apostar({
   const error = espn.error && seriec.error;
   const refetch = () => { espn.refetch(); seriec.refetch(); };
 
+  // ── Pull-to-refresh ──
+  const [pullY, setPullY] = useState(0);
+  const [ptrRefreshing, setPtrRefreshing] = useState(false);
+  const ptrRef = useRef({ startY: 0, active: false });
+  const PTR_THRESHOLD = 65;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    const main = (e.currentTarget as HTMLElement).closest("main");
+    if (!main || main.scrollTop > 2) return;
+    ptrRef.current = { startY: e.touches[0].clientY, active: true };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!ptrRef.current.active) return;
+    const main = (e.currentTarget as HTMLElement).closest("main");
+    if (main && main.scrollTop > 2) { ptrRef.current.active = false; setPullY(0); return; }
+    const delta = e.touches[0].clientY - ptrRef.current.startY;
+    setPullY(delta > 0 ? Math.min(delta * 0.42, 90) : 0);
+  };
+  const onTouchEnd = async () => {
+    ptrRef.current.active = false;
+    if (pullY >= PTR_THRESHOLD && !ptrRefreshing) {
+      setPtrRefreshing(true);
+      espn.silentRefetch();
+      seriec.silentRefetch();
+      setTimeout(() => setPtrRefreshing(false), 1200);
+    }
+    setPullY(0);
+  };
+
   const isCurrentRound = anchorTs >= todayMidnight() - 86400000;
 
   const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
@@ -2363,7 +2392,42 @@ function Apostar({
     );
 
   return (
-    <div className="pb-4 space-y-3 flex flex-col">
+    <div
+      className="pb-4 space-y-3 flex flex-col"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Pull-to-refresh indicator */}
+      <div
+        style={{
+          overflow: "hidden",
+          height: ptrRefreshing ? 44 : Math.min(pullY, 44),
+          transition: pullY === 0 ? "height 0.25s ease" : "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          opacity: ptrRefreshing ? 1 : Math.min(pullY / PTR_THRESHOLD, 1),
+          transform: `scale(${ptrRefreshing ? 1 : Math.min(0.6 + (pullY / PTR_THRESHOLD) * 0.4, 1)})`,
+          transition: pullY === 0 ? "opacity 0.2s, transform 0.2s" : "none",
+        }}>
+          <RefreshCw
+            size={16}
+            className={ptrRefreshing ? "animate-spin" : ""}
+            style={{ color: "#FBBF24", transform: ptrRefreshing ? undefined : `rotate(${pullY * 3}deg)` }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#FBBF24" }}>
+            {ptrRefreshing ? "Atualizando…" : pullY >= PTR_THRESHOLD ? "Solte para atualizar" : "Puxe para atualizar"}
+          </span>
+        </div>
+      </div>
+
       {/* ── Navegação de rodadas ── */}
       <div
         className="flex items-center justify-between rounded-xl px-3 py-2.5 border"
