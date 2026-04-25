@@ -4111,11 +4111,6 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   );
   const [clearingResults, setClearingResults] = useState(false);
   const [resultsCount, setResultsCount] = useState(0);
-  const [admDbResults, setAdmDbResults] = useState<Record<string, { home: string; away: string }>>({});
-  const [manualMatch, setManualMatch] = useState<Match | null>(null);
-  const [manualHome, setManualHome] = useState("");
-  const [manualAway, setManualAway] = useState("");
-  const [savingManual, setSavingManual] = useState(false);
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -4194,13 +4189,10 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     setUserTotal(allUsersData?.filter((u: any) => u.status === "aprovado").length || 0);
     setSelectedMatchIds((selMatches || []).map((m) => m.match_id));
 
-    const { data: dbResultsData, count } = await supabase
+    const { count } = await supabase
       .from("resultados_rodada")
-      .select("match_id, home_score, away_score", { count: "exact" });
+      .select("match_id", { count: "exact", head: true });
     setResultsCount(count ?? 0);
-    const dbMap: Record<string, { home: string; away: string }> = {};
-    (dbResultsData ?? []).forEach((r: any) => { dbMap[r.match_id] = { home: r.home_score, away: r.away_score }; });
-    setAdmDbResults(dbMap);
 
     setLoading(false);
   };
@@ -4742,37 +4734,19 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                         <p className="text-[10px]" style={{ color: T.textMuted(d) }}>
                           {fmtDate(m.date)}
                         </p>
-                        {admDbResults[m.id] && (
-                          <p className="text-[10px] font-black text-amber-400 mt-0.5">
-                            ✓ {admDbResults[m.id].home} – {admDbResults[m.id].away} (salvo)
-                          </p>
-                        )}
                       </div>
                     </div>
-                    <div className="flex flex-col gap-1.5 shrink-0">
-                      <button
-                        onClick={() => toggleMatchSelection(m.id)}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                        style={{
-                          background: isSelected ? leagueColor + "1A" : T.elevated(d),
-                          color: isSelected ? leagueColor : T.textMuted(d),
-                          border: `1px solid ${isSelected ? leagueColor + "33" : T.border(d)}`,
-                        }}
-                      >
-                        {isSelected ? "Incluído" : "Incluir"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setManualMatch(m);
-                          setManualHome(admDbResults[m.id]?.home ?? "");
-                          setManualAway(admDbResults[m.id]?.away ?? "");
-                        }}
-                        className="px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all"
-                        style={{ background: "rgba(251,191,36,0.08)", color: "#FBBF24", border: "1px solid rgba(251,191,36,0.2)" }}
-                      >
-                        Resultado
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => toggleMatchSelection(m.id)}
+                      className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                      style={{
+                        background: isSelected ? leagueColor + "1A" : T.elevated(d),
+                        color: isSelected ? leagueColor : T.textMuted(d),
+                        border: `1px solid ${isSelected ? leagueColor + "33" : T.border(d)}`,
+                      }}
+                    >
+                      {isSelected ? "Incluído" : "Incluir"}
+                    </button>
                   </div>
                 );
               })}
@@ -4783,91 +4757,6 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
               )}
             </div>
 
-            {/* Modal de resultado manual */}
-            {manualMatch && (
-              <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
-                <motion.div
-                  initial={{ opacity: 0, y: 40 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="w-full max-w-sm rounded-3xl p-6 space-y-5"
-                  style={{ background: T.elevated(d), border: `1px solid ${T.border(d)}` }}
-                >
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest opacity-40 mb-1" style={{ color: T.text(d) }}>Resultado Manual</p>
-                    <p className="font-black text-sm" style={{ color: T.text(d) }}>{manualMatch.homeName} × {manualMatch.awayName}</p>
-                    <p className="text-[10px]" style={{ color: T.textMuted(d) }}>{fmtDate(manualMatch.date)}</p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold mb-1 text-center" style={{ color: T.textMuted(d) }}>{manualMatch.homeName}</p>
-                      <input
-                        type="number" min="0" max="99"
-                        value={manualHome}
-                        onChange={e => setManualHome(e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full text-center text-2xl font-black rounded-xl py-3 outline-none"
-                        style={{ background: T.surface(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }}
-                        placeholder="0"
-                      />
-                    </div>
-                    <span className="text-2xl font-black opacity-30" style={{ color: T.text(d) }}>×</span>
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold mb-1 text-center" style={{ color: T.textMuted(d) }}>{manualMatch.awayName}</p>
-                      <input
-                        type="number" min="0" max="99"
-                        value={manualAway}
-                        onChange={e => setManualAway(e.target.value.replace(/\D/g, "").slice(0, 2))}
-                        className="w-full text-center text-2xl font-black rounded-xl py-3 outline-none"
-                        style={{ background: T.surface(d), border: `1.5px solid ${T.inputBdr(d)}`, color: T.text(d) }}
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setManualMatch(null)}
-                      className="flex-1 py-3 rounded-xl text-sm font-bold"
-                      style={{ background: T.surface(d), color: T.textMuted(d), border: `1px solid ${T.border(d)}` }}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      disabled={manualHome === "" || manualAway === "" || savingManual}
-                      onClick={async () => {
-                        if (manualHome === "" || manualAway === "") return;
-                        setSavingManual(true);
-                        const roundNum = String(admLeague === "bra.3"
-                          ? serieCAdmData?.roundNumber ?? ""
-                          : roundData?.roundNumber ?? "");
-                        await supabase.from("resultados_rodada").upsert({
-                          match_id: manualMatch.id,
-                          home_team: manualMatch.home,
-                          away_team: manualMatch.away,
-                          home_name: manualMatch.homeName,
-                          away_name: manualMatch.awayName,
-                          home_logo: manualMatch.homeLogo,
-                          away_logo: manualMatch.awayLogo,
-                          home_score: manualHome,
-                          away_score: manualAway,
-                          match_date: manualMatch.date,
-                          league: manualMatch.league ?? admLeague,
-                          round_number: roundNum,
-                        }, { onConflict: "match_id" });
-                        setAdmDbResults(prev => ({ ...prev, [manualMatch.id]: { home: manualHome, away: manualAway } }));
-                        setResultsCount(c => c + (admDbResults[manualMatch.id] ? 0 : 1));
-                        setSavingManual(false);
-                        setManualMatch(null);
-                      }}
-                      className="flex-1 py-3 rounded-xl text-sm font-black transition-all active:scale-95 disabled:opacity-40"
-                      style={{ background: "linear-gradient(135deg,#FBBF24,#F59E0B)", color: "#0C1120" }}
-                    >
-                      {savingManual ? "Salvando…" : "Salvar"}
-                    </button>
-                  </div>
-                </motion.div>
-              </div>
-            )}
           </motion.div>
         ) : admTab === "usuarios" ? (
           <motion.div
