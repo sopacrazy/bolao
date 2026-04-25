@@ -357,6 +357,13 @@ function parseTsdbEvents(events: any[]): Match[] {
         : (ev.dateEvent ?? "");
     const homeScore = ev.intHomeScore != null ? String(ev.intHomeScore) : "-";
     const awayScore = ev.intAwayScore != null ? String(ev.intAwayScore) : "-";
+    const rawStatus = TSDB_STATUS[ev.strStatus ?? "NS"] ?? "STATUS_SCHEDULED";
+    // TSDB demora a atualizar FT — se passou 2h30 do início e ainda marca ao vivo, encerra
+    const startMs = dateStr ? new Date(dateStr).getTime() : 0;
+    const status =
+      startMs > 0 && isLive(rawStatus) && Date.now() - startMs > 150 * 60 * 1000
+        ? "STATUS_FINAL"
+        : rawStatus;
     return {
       id: String(ev.idEvent),
       home: (ev.strHomeTeam ?? "?").substring(0, 3).toUpperCase(),
@@ -368,7 +375,7 @@ function parseTsdbEvents(events: any[]): Match[] {
       homeScore,
       awayScore,
       date: dateStr,
-      status: TSDB_STATUS[ev.strStatus ?? "NS"] ?? "STATUS_SCHEDULED",
+      status,
       clock: ev.strProgress ?? "",
     };
   });
