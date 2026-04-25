@@ -2128,7 +2128,7 @@ function Apostar({
         await navigator.share({
           files: [file],
           title: "Meus Palpites - Bolão dos Clássicos",
-          text: `Confira meus palpites para a rodada! 🏆`,
+          text: `Confira meus palpites para a rodada! 🏆\n@${user?.apelido ?? user?.nome ?? ""}`,
         });
       } else {
         const link = document.createElement("a");
