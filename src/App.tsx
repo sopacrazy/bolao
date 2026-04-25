@@ -302,7 +302,8 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
 const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/123";
 const TSDB_LEAGUE = "4625";
 const TSDB_CACHE = "bolao_seriesc_v2";
-const TSDB_TTL = 30 * 60 * 1000; // 30 min
+const TSDB_TTL = 30 * 60 * 1000; // 30 min (idle)
+const TSDB_TTL_LIVE = 90 * 1000;  // 90s when any game is live
 
 const TSDB_STATUS: Record<string, string> = {
   NS: "STATUS_SCHEDULED",
@@ -357,7 +358,11 @@ function useSerieCRodada(showPast: boolean) {
         const raw = localStorage.getItem(cacheKey);
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
-          if (Date.now() - ts < TSDB_TTL) {
+          const hasLive = (payload as RodadaData)?.matches?.some(
+            (m: Match) => m.status === "STATUS_IN_PROGRESS" || m.status === "STATUS_HALFTIME"
+          );
+          const ttl = hasLive ? TSDB_TTL_LIVE : TSDB_TTL;
+          if (Date.now() - ts < ttl) {
             setData(payload);
             setLoading(false);
             return;
