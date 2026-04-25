@@ -360,10 +360,12 @@ function parseTsdbEvents(events: any[]): Match[] {
     const homeScore = ev.intHomeScore != null ? String(ev.intHomeScore) : "-";
     const awayScore = ev.intAwayScore != null ? String(ev.intAwayScore) : "-";
     const rawStatus = TSDB_STATUS[ev.strStatus ?? "NS"] ?? "STATUS_SCHEDULED";
-    // TSDB demora a atualizar FT — se passou 2h30 do início e ainda marca ao vivo, encerra
+    // TSDB frequentemente não atualiza o status — se passou 2h30 do início e ainda mostra
+    // ao vivo OU agendado, força encerrado
     const startMs = dateStr ? new Date(dateStr).getTime() : 0;
+    const isOverdue = startMs > 0 && Date.now() - startMs > 150 * 60 * 1000;
     const status =
-      startMs > 0 && isLive(rawStatus) && Date.now() - startMs > 150 * 60 * 1000
+      isOverdue && (isLive(rawStatus) || rawStatus === "STATUS_SCHEDULED")
         ? "STATUS_FINAL"
         : rawStatus;
     return {
@@ -398,11 +400,14 @@ function useSerieCRodada(showPast: boolean) {
         const raw = localStorage.getItem(cacheKey);
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
+          const _now = Date.now();
           const hasLive = (payload as RodadaData)?.matches?.some(
-            (m: Match) => isLive(m.status)
+            (m: Match) =>
+              isLive(m.status) ||
+              (m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < _now)
           );
           const ttl = hasLive ? TSDB_TTL_LIVE : TSDB_TTL;
-          if (Date.now() - ts < ttl) {
+          if (_now - ts < ttl) {
             setData(payload);
             setLoading(false);
             return;
@@ -436,7 +441,28 @@ function useSerieCRodada(showPast: boolean) {
         if (roundJson.events?.length) allEvents = roundJson.events;
       }
 
-      const matches = parseTsdbEvents(allEvents);
+      let matches = parseTsdbEvents(allEvents);
+
+      // Se há jogos sem placar que já deveriam ter encerrado, tenta recuperar via eventspastleague
+      const hasMissingScores = matches.some(
+        m => m.status === "STATUS_FINAL" && m.homeScore === "-"
+      );
+      if (hasMissingScores) {
+        try {
+          const pastRes = await fetch(`${TSDB_BASE}/eventspastleague.php?id=${TSDB_LEAGUE}`);
+          if (pastRes.ok) {
+            const pastJson = await pastRes.json();
+            const pastMatches = parseTsdbEvents(pastJson.events ?? []);
+            matches = matches.map(m => {
+              if (m.homeScore !== "-") return m;
+              const past = pastMatches.find(p => p.id === m.id);
+              if (past && past.homeScore !== "-") return { ...m, homeScore: past.homeScore, awayScore: past.awayScore, status: "STATUS_FINAL" };
+              return m;
+            });
+          }
+        } catch {}
+      }
+
       const result: RodadaData = { matches, roundNumber };
 
       // Se todos os jogos encerraram, salva como "rodada finalizada" para exibir por 24h
