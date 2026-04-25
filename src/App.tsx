@@ -224,6 +224,17 @@ async function espnDateRange(
   return { matches: parseMatches(events), roundNumber };
 }
 
+function isLive(status: string) {
+  return (
+    status === "STATUS_IN_PROGRESS" ||
+    status === "STATUS_FIRST_HALF" ||
+    status === "STATUS_SECOND_HALF" ||
+    status === "STATUS_HALFTIME" ||
+    status === "STATUS_EXTRA_TIME" ||
+    status === "STATUS_OVERTIME"
+  );
+}
+
 function todayMidnight() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -246,7 +257,13 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
         const raw = localStorage.getItem(cacheKey);
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
-          if (Date.now() - ts < CACHE_TTL) {
+          const now = Date.now();
+          const needsFastPoll = (payload as RodadaData)?.matches?.some(
+            (m: Match) =>
+              isLive(m.status) ||
+              (m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < now)
+          );
+          if (now - ts < (needsFastPoll ? CACHE_TTL : 30 * 60 * 1000)) {
             setData(payload);
             setLoading(false);
             return;
@@ -261,16 +278,16 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
       let result: RodadaData;
 
       if (isCurrent) {
-        // Janela atual: de hoje até +30 dias (cobre até 2 rodadas, mas filtramos pela próxima)
-        const future = new Date(anchor.getTime() + 30 * 86400000);
-        result = await espnDateRange(anchor, future, league, true);
+        // Endpoint ao vivo primeiro — sempre tem placares atualizados
+        const res = await fetch(espnBase(league));
+        const json = await res.json();
+        const { events, roundNumber } = filterNextRound(json.events ?? [], true);
+        result = { matches: parseMatches(events), roundNumber };
 
-        // Fallback ao endpoint padrão (pode ter jogo ao vivo)
+        // Fallback ao range de datas (para rodadas futuras ainda não no scoreboard ao vivo)
         if (result.matches.length === 0) {
-          const res = await fetch(espnBase(league));
-          const json = await res.json();
-          const { events, roundNumber } = filterNextRound(json.events ?? [], true);
-          result = { matches: parseMatches(events), roundNumber };
+          const future = new Date(anchor.getTime() + 30 * 86400000);
+          result = await espnDateRange(anchor, future, league, true);
         }
       } else {
         // Histórico: janela de 8 dias centrada no anchor
@@ -294,6 +311,20 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
   useEffect(() => {
     load();
   }, [anchorTs, league]);
+
+  // Auto-poll enquanto houver jogo ao vivo ou já iniciado mas ainda como agendado no cache
+  useEffect(() => {
+    const now = Date.now();
+    const needsPoll = data?.matches.some(
+      (m) =>
+        isLive(m.status) ||
+        (m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < now)
+    );
+    if (!needsPoll) return;
+    const id = setInterval(() => load(true), CACHE_TTL);
+    return () => clearInterval(id);
+  }, [data]);
+
   return { data, loading, error, refetch: () => load(true) };
 }
 
@@ -359,7 +390,7 @@ function useSerieCRodada(showPast: boolean) {
         if (raw) {
           const { payload, ts } = JSON.parse(raw);
           const hasLive = (payload as RodadaData)?.matches?.some(
-            (m: Match) => m.status === "STATUS_IN_PROGRESS" || m.status === "STATUS_HALFTIME"
+            (m: Match) => isLive(m.status)
           );
           const ttl = hasLive ? TSDB_TTL_LIVE : TSDB_TTL;
           if (Date.now() - ts < ttl) {
@@ -413,6 +444,20 @@ function useSerieCRodada(showPast: boolean) {
   useEffect(() => {
     load();
   }, [showPast]);
+
+  // Auto-poll enquanto houver jogo ao vivo ou já iniciado da Série C
+  useEffect(() => {
+    const now = Date.now();
+    const needsPoll = data?.matches.some(
+      (m) =>
+        isLive(m.status) ||
+        (m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < now)
+    );
+    if (!needsPoll) return;
+    const id = setInterval(() => load(true), TSDB_TTL_LIVE);
+    return () => clearInterval(id);
+  }, [data]);
+
   return { data, loading, error, refetch: () => load(true) };
 }
 
@@ -470,7 +515,7 @@ function StatusBadge({
   clock: string;
   closed?: boolean;
 }) {
-  if (status === "STATUS_IN_PROGRESS" || status === "STATUS_HALFTIME") {
+  if (isLive(status)) {
     return (
       <div
         className="flex items-center gap-1.5 px-2 py-0.5 rounded-full"
@@ -2394,10 +2439,7 @@ function Apostar({
         const sa = activeScores[match.id]?.away ?? "";
         // Em modo histórico, trata todos como encerrados visualmente
         const closed = match.status === "STATUS_FINAL" || !isCurrentRound;
-        const live =
-          isCurrentRound &&
-          (match.status === "STATUS_IN_PROGRESS" ||
-            match.status === "STATUS_HALFTIME");
+        const live = isCurrentRound && isLive(match.status);
 
         // Cor da borda baseada no resultado
         const bet = activeScores[match.id];
