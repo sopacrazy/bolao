@@ -333,8 +333,10 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
 const TSDB_BASE = "https://www.thesportsdb.com/api/v1/json/123";
 const TSDB_LEAGUE = "4625";
 const TSDB_CACHE = "bolao_seriesc_v2";
+const TSDB_FINISHED_CACHE = "bolao_seriesc_finished_v1";
 const TSDB_TTL = 30 * 60 * 1000; // 30 min (idle)
 const TSDB_TTL_LIVE = 90 * 1000;  // 90s when any game is live
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const TSDB_STATUS: Record<string, string> = {
   NS: "STATUS_SCHEDULED",
@@ -436,6 +438,29 @@ function useSerieCRodada(showPast: boolean) {
 
       const matches = parseTsdbEvents(allEvents);
       const result: RodadaData = { matches, roundNumber };
+
+      // Se todos os jogos encerraram, salva como "rodada finalizada" para exibir por 24h
+      const allDone = matches.length > 0 && matches.every(m => m.status === "STATUS_FINAL");
+      if (allDone) {
+        const latestTs = Math.max(...matches.map(m => new Date(m.date).getTime()));
+        localStorage.setItem(TSDB_FINISHED_CACHE, JSON.stringify({ payload: result, latestMatchTs: latestTs }));
+      }
+
+      // Se o TSDB avançou para a próxima rodada mas a anterior terminou < 24h, continua mostrando a anterior
+      try {
+        const finRaw = localStorage.getItem(TSDB_FINISHED_CACHE);
+        if (finRaw) {
+          const { payload: finPayload, latestMatchTs } = JSON.parse(finRaw);
+          const sameRound = String(finPayload.roundNumber) === String(roundNumber);
+          if (!sameRound && Date.now() - latestMatchTs < ONE_DAY_MS) {
+            localStorage.setItem(cacheKey, JSON.stringify({ payload: finPayload, ts: Date.now() }));
+            setData(finPayload);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
       localStorage.setItem(
         cacheKey,
         JSON.stringify({ payload: result, ts: Date.now() }),
