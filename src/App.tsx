@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Trophy,
@@ -82,6 +82,22 @@ const espnBase = (lg: League) =>
 const espnSummary = (lg: League) =>
   `https://site.api.espn.com/apis/site/v2/sports/soccer/${lg}/summary`;
 const CACHE_KEY = "bolao_espn_v4";
+
+// Extrai { status, homeScore, awayScore } de uma resposta de sumário ESPN.
+// O soccer usa 'header' OU 'gamepackageJSON.header' dependendo do evento.
+function parseEspnSummaryResponse(json: any): { status: string; homeScore: string; awayScore: string; clock: string } | null {
+  const headerData = json?.header ?? json?.gamepackageJSON?.header;
+  const comp = headerData?.competitions?.[0];
+  if (!comp) return null;
+  const comps: any[] = comp.competitors ?? comp.teams ?? [];
+  if (!comps.length) return null;
+  const home = comps.find((c: any) => c.homeAway === "home") ?? comps[0];
+  const away = comps.find((c: any) => c.homeAway === "away") ?? comps[1];
+  const st: string = comp.status?.type?.name ?? "STATUS_SCHEDULED";
+  const hs = home?.score != null ? String(home.score) : "-";
+  const as_ = away?.score != null ? String(away.score) : "-";
+  return { status: st, homeScore: hs, awayScore: as_, clock: comp.status?.displayClock ?? "" };
+}
 const CACHE_TTL = 90 * 1000; // 90s
 
 // Formata Date → "YYYYMMDD"
@@ -282,24 +298,64 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
         const future = new Date(anchor.getTime() + 30 * 86400000);
         result = await espnDateRange(anchor, future, league, true);
 
-        // Sobrepõe placares ao vivo do scoreboard ESPN (mais atualizado para jogos em andamento)
+        // ── Passo 2: overlay por data explícita ──────────────────────────────
+        // ESPN ?dates=YYYYMMDD retorna todos os jogos do dia (ao vivo E encerrados).
+        // Busca cada dia da rodada que já chegou para sobrepor status/placar frescos.
         try {
-          const liveRes = await fetch(espnBase(league));
-          const liveJson = await liveRes.json();
-          const liveEvents: any[] = liveJson.events ?? [];
-          if (liveEvents.length > 0) {
-            const liveById = new Map(liveEvents.map((ev: any) => [ev.id, ev]));
+          const nowMs = Date.now();
+          const pastDates = [
+            ...new Set(
+              result.matches
+                .filter(m => new Date(m.date).getTime() <= nowMs + 60 * 60 * 1000)
+                .map(m => ymd(new Date(m.date)))
+            ),
+          ];
+          const dayFetches = await Promise.allSettled(
+            pastDates.map(d => fetch(`${espnBase(league)}?dates=${d}`).then(r => r.json()))
+          );
+          const freshById = new Map<string, any>();
+          dayFetches.forEach(res => {
+            if (res.status !== "fulfilled") return;
+            (res.value?.events ?? []).forEach((ev: any) => freshById.set(ev.id, ev));
+          });
+          if (freshById.size > 0) {
             result = {
               ...result,
               matches: result.matches.map(m => {
-                const liveEv = liveById.get(m.id);
-                return liveEv ? parseMatches([liveEv])[0] : m;
+                const fresh = freshById.get(m.id);
+                return fresh ? parseMatches([fresh])[0] : m;
               }),
             };
           }
         } catch {}
 
-        // Fallback: se range de datas não retornou nada, usa só o live
+        // ── Passo 3: sumário individual para jogos atrasados ─────────────────
+        // Se após os passos 1+2 ainda há jogos STATUS_SCHEDULED com horário passado
+        // há >90 min, busca o sumário ESPN de cada um (inclui jogos encerrados que
+        // o scoreboard não devolve mais).
+        try {
+          const nowMs = Date.now();
+          const stuck = result.matches.filter(
+            m => m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < nowMs - 90 * 60 * 1000
+          );
+          if (stuck.length > 0) {
+            const summaries = await Promise.allSettled(
+              stuck.map(m => fetch(`${espnSummary(league)}?event=${m.id}`).then(r => r.json()))
+            );
+            const patchMap = new Map<string, Match>();
+            summaries.forEach((res, i) => {
+              if (res.status !== "fulfilled") return;
+              const parsed = parseEspnSummaryResponse(res.value);
+              if (!parsed || parsed.status === "STATUS_SCHEDULED") return;
+              patchMap.set(stuck[i].id, { ...stuck[i], ...parsed });
+            });
+            if (patchMap.size > 0) {
+              result = { ...result, matches: result.matches.map(m => patchMap.get(m.id) ?? m) };
+            }
+          }
+        } catch {}
+
+        // Fallback: se range de datas não retornou nada, usa o scoreboard geral
         if (result.matches.length === 0) {
           const res = await fetch(espnBase(league));
           const json = await res.json();
@@ -460,9 +516,11 @@ function useSerieCRodada(showPast: boolean) {
 
       let matches = parseTsdbEvents(allEvents);
 
-      // Se há jogos sem placar que já deveriam ter encerrado, tenta recuperar via eventspastleague
+      // Se há jogos sem placar (encerrados ou atrasados), tenta recuperar via eventspastleague
+      const nowMs2 = Date.now();
       const hasMissingScores = matches.some(
-        m => m.status === "STATUS_FINAL" && m.homeScore === "-"
+        m => (m.status === "STATUS_FINAL" && m.homeScore === "-") ||
+             (m.status === "STATUS_SCHEDULED" && new Date(m.date).getTime() < nowMs2 - 90 * 60 * 1000)
       );
       if (hasMissingScores) {
         try {
@@ -2025,7 +2083,33 @@ function Apostar({
   const [isLocked, setIsLocked] = useState(false);
   const [sharedFile, setSharedFile] = useState<File | null>(null);
   const [sharingPending, setSharingPending] = useState(false);
+  const [dbResults, setDbResults] = useState<Record<string, { homeScore: string; awayScore: string }>>({});
   const shareRef = React.useRef<HTMLDivElement>(null);
+
+  // Busca resultados do banco a cada 30s
+  useEffect(() => {
+    const fetchDbResults = () => {
+      supabase
+        .from("resultados_rodada")
+        .select("match_id, home_score, away_score")
+        .then(({ data, error }) => {
+          if (error || !data?.length) return;
+          const map: Record<string, { homeScore: string; awayScore: string }> = {};
+
+          data.forEach((r: any) => {
+            if (r.home_score != null && r.away_score != null) {
+              map[r.match_id] = { homeScore: String(r.home_score), awayScore: String(r.away_score) };
+            }
+          });
+          setDbResults(map);
+        });
+    };
+
+    fetchDbResults();
+    const id = setInterval(fetchDbResults, 30000);
+    return () => clearInterval(id);
+  }, []);
+
 
   useEffect(() => {
     if (espn.data?.roundNumber) onRoundLoad(espn.data.roundNumber);
@@ -2105,6 +2189,8 @@ function Apostar({
   const matches = rawMatches.filter(
     (m) => liberatedIds.includes(m.id) || !isCurrentRound,
   );
+
+
 
   // ── MOCK TEST ── remova este bloco quando quiser voltar ao normal ──────────
   const MOCK_TEST = false;
@@ -2223,13 +2309,25 @@ function Apostar({
     : {};
 
   // Enriquece matches com resultados salvos no banco (cobre falhas de API)
-  const mergedMatches = MOCK_TEST ? matches : matches.map(m => {
-    if (m.homeScore !== "-" || !dbResults[m.id]) return m;
-    const db = dbResults[m.id];
-    return { ...m, homeScore: db.homeScore, awayScore: db.awayScore, status: "STATUS_FINAL" };
-  });
+  const mergedMatches = useMemo(() => {
+    if (MOCK_TEST) return matches;
+    const result = matches.map(m => {
+      const db = dbResults[m.id];
+      if (db) {
+        return { ...m, homeScore: db.homeScore, awayScore: db.awayScore, status: "STATUS_FINAL" };
+      }
+      return m;
+    });
+    return result;
+
+
+  }, [matches, dbResults, MOCK_TEST]);
+
+
+
   const activeMatches = MOCK_TEST ? mockMatches : mergedMatches;
   const activeScores = MOCK_TEST ? mockScores : scores;
+
   // Bloqueia envio assim que qualquer jogo da rodada sair de "Agendado"
   const roundStarted = isCurrentRound && activeMatches.some(
     (m) => m.status !== "STATUS_SCHEDULED"
@@ -2237,26 +2335,16 @@ function Apostar({
   const activeIsLocked = MOCK_TEST ? true : (isLocked || roundStarted);
   // ── fim MOCK TEST ──────────────────────────────────────────────────────────
 
-  // ── Resultados da rodada no banco ──────────────────────────────────────────
-  const [dbResults, setDbResults] = useState<Record<string, { homeScore: string; awayScore: string }>>({});
 
-  useEffect(() => {
-    supabase
-      .from("resultados_rodada")
-      .select("match_id, home_score, away_score")
-      .then(({ data }) => {
-        if (!data) return;
-        const map: Record<string, { homeScore: string; awayScore: string }> = {};
-        data.forEach((r: any) => { map[r.match_id] = { homeScore: r.home_score, awayScore: r.away_score }; });
-        setDbResults(map);
-      });
-  }, []);
 
-  // Salva jogos encerrados com placar válido na tabela resultados_rodada
+  // Salva jogos com placar válido (ao vivo OU encerrados) para garantir backup no banco
   useEffect(() => {
     if (MOCK_TEST || !matches.length) return;
     const roundNum = String(espn.data?.roundNumber ?? seriec.data?.roundNumber ?? "");
-    const finalMatches = matches.filter(m => m.status === "STATUS_FINAL" && m.homeScore !== "-" && m.awayScore !== "-");
+    const finalMatches = matches.filter(m =>
+      (m.status === "STATUS_FINAL" || isLive(m.status)) &&
+      m.homeScore !== "-" && m.awayScore !== "-"
+    );
     if (!finalMatches.length) return;
     supabase.from("resultados_rodada").upsert(
       finalMatches.map(m => ({
@@ -2274,13 +2362,20 @@ function Apostar({
         round_number: roundNum,
       })),
       { onConflict: "match_id" }
-    );
+    ).then(() => {
+      // Atualiza dbResults localmente para refletir imediatamente no UI
+      setDbResults(prev => {
+        const next = { ...prev };
+        finalMatches.forEach(m => { next[m.id] = { homeScore: m.homeScore, awayScore: m.awayScore }; });
+        return next;
+      });
+    });
   }, [matches]);
 
   // Salva pontos no banco quando jogos finalizam (roda a cada refresh do ESPN ~90s)
   useEffect(() => {
-    if (!isLocked || !user || !matches.length) return;
-    const finalWithBet = matches.filter(
+    if (!isLocked || !user || !activeMatches.length) return;
+    const finalWithBet = activeMatches.filter(
       (m) =>
         m.status === "STATUS_FINAL" &&
         m.homeScore !== "-" &&
@@ -2629,6 +2724,7 @@ function Apostar({
         // Em modo histórico, trata todos como encerrados visualmente
         const closed = match.status === "STATUS_FINAL" || !isCurrentRound;
         const live = isCurrentRound && isLive(match.status);
+
 
         // Cor da borda baseada no resultado
         const bet = activeScores[match.id];
@@ -4128,6 +4224,8 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
   );
   const [clearingResults, setClearingResults] = useState(false);
   const [resultsCount, setResultsCount] = useState(0);
+  const [fetchingResults, setFetchingResults] = useState(false);
+  const [fetchResultsMsg, setFetchResultsMsg] = useState("");
   const [pending, setPending] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -4424,6 +4522,75 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 </button>
               ))}
 
+              {/* Buscar resultados da ESPN e salvar no banco */}
+              <button
+                onClick={async () => {
+                  setFetchingResults(true);
+                  setFetchResultsMsg("");
+                  try {
+                    // Coleta todos os jogos do admin (Série A + C)
+                    const allAdmMatches: Match[] = [
+                      ...(roundData?.matches ?? []).map(m => ({ ...m, league: "bra.1" as const })),
+                      ...(serieCAdmData?.matches ?? []).map(m => ({ ...m, league: "bra.3" as const })),
+                    ];
+                    if (!allAdmMatches.length) { setFetchResultsMsg("Nenhum jogo carregado."); return; }
+
+                    // Busca sumário ESPN para cada jogo da Série A
+                    const espnGames = allAdmMatches.filter(m => m.league === "bra.1");
+                    const summaries = await Promise.allSettled(
+                      espnGames.map(m =>
+                        fetch(`${espnSummary("bra.1")}?event=${m.id}`).then(r => r.json())
+                      )
+                    );
+
+                    const toSave: typeof allAdmMatches = [];
+                    summaries.forEach((res, i) => {
+                      if (res.status !== "fulfilled") return;
+                      const parsed = parseEspnSummaryResponse(res.value);
+                      if (!parsed || parsed.status === "STATUS_SCHEDULED") return;
+                      if (parsed.homeScore === "-" || parsed.awayScore === "-") return;
+                      toSave.push({ ...espnGames[i], homeScore: parsed.homeScore, awayScore: parsed.awayScore, status: parsed.status });
+                    });
+
+                    if (!toSave.length) { setFetchResultsMsg("Nenhum resultado encontrado na ESPN."); return; }
+
+                    const roundNum = String(roundData?.roundNumber ?? "");
+                    const { error } = await supabase.from("resultados_rodada").upsert(
+                      toSave.map(m => ({
+                        match_id: m.id, home_team: m.home, away_team: m.away,
+                        home_name: m.homeName, away_name: m.awayName,
+                        home_logo: m.homeLogo, away_logo: m.awayLogo,
+                        home_score: m.homeScore, away_score: m.awayScore,
+                        match_date: m.date, league: m.league ?? "bra.1", round_number: roundNum,
+                      })),
+                      { onConflict: "match_id" }
+                    );
+                    if (error) { setFetchResultsMsg(`Erro ao salvar: ${error.message}`); return; }
+                    setResultsCount(prev => prev + toSave.length);
+                    setFetchResultsMsg(`${toSave.length} resultado(s) salvo(s)!`);
+                  } catch (e: any) {
+                    setFetchResultsMsg(`Erro: ${e.message}`);
+                  } finally {
+                    setFetchingResults(false);
+                  }
+                }}
+                disabled={fetchingResults}
+                className="flex items-center gap-4 p-4 rounded-[2rem] border transition-all active:scale-[0.98] disabled:opacity-40"
+                style={{ background: "rgba(34,197,94,0.06)", borderColor: "rgba(34,197,94,0.2)" }}
+              >
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-white/5 border" style={{ borderColor: T.border(d) }}>
+                  {fetchingResults
+                    ? <RefreshCw size={20} className="animate-spin text-green-400" />
+                    : <RefreshCw size={20} className="text-green-400" />}
+                </div>
+                <div className="text-left flex-1 min-w-0">
+                  <p className="font-bold text-sm text-green-400">Buscar Resultados da ESPN</p>
+                  <p className="text-[10px] opacity-60" style={{ color: T.text(d) }}>
+                    {fetchResultsMsg || "Busca e salva placares finais no banco"}
+                  </p>
+                </div>
+              </button>
+
               {/* Zerar resultados da rodada */}
               <button
                 onClick={async () => {
@@ -4433,6 +4600,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                   await supabase.from("resultados_rodada").delete().neq("match_id", "");
                   setResultsCount(0);
                   setClearingResults(false);
+                  setFetchResultsMsg("");
                 }}
                 disabled={resultsCount === 0 || clearingResults}
                 className="flex items-center gap-4 p-4 rounded-[2rem] border transition-all active:scale-[0.98] disabled:opacity-40"
@@ -5897,7 +6065,7 @@ export default function App() {
       </header>
 
       {/* Main */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
         <div className={`px-4 pt-4 pb-2 ${tab === 'admin' ? 'max-w-6xl' : 'max-w-4xl'} mx-auto transition-all duration-300`}>
           <AnimatePresence mode="wait">
             {tab === "apostar" && (
@@ -5958,7 +6126,7 @@ export default function App() {
 
       {/* Bottom nav — mobile only */}
       <nav
-        className="md:hidden shrink-0 z-50 transition-colors duration-300"
+        className="md:hidden fixed bottom-0 inset-x-0 z-50 transition-colors duration-300"
         style={{
           background: T.navBg(d),
           backdropFilter: "blur(20px)",
