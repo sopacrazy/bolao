@@ -187,8 +187,9 @@ export function useRodada(anchorTs: number, league: League = "bra.1") {
       let result: RodadaData;
 
       if (isCurrent) {
-        const future = new Date(anchor.getTime() + 30 * 86400000);
-        result = await espnDateRange(anchor, future, league, true);
+        const past = new Date(anchor.getTime() - 4 * 86400000);
+        const future = new Date(anchor.getTime() + 26 * 86400000);
+        result = await espnDateRange(past, future, league, true);
 
         if (result.matches.length === 0) {
           const res = await fetch(espnBase(league));

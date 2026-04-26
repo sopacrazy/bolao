@@ -294,9 +294,10 @@ function useRodada(anchorTs: number, league: League = "bra.1") {
       let result: RodadaData;
 
       if (isCurrent) {
-        // Busca a rodada completa pelo range de datas (inclui jogos de todos os dias da rodada)
-        const future = new Date(anchor.getTime() + 30 * 86400000);
-        result = await espnDateRange(anchor, future, league, true);
+        // Busca a rodada completa começando um pouco antes (para incluir jogos de ontem)
+        const past = new Date(anchor.getTime() - 4 * 86400000);
+        const future = new Date(anchor.getTime() + 26 * 86400000);
+        result = await espnDateRange(past, future, league, true);
 
         // ── Passo 2: overlay por data explícita ──────────────────────────────
         // ESPN ?dates=YYYYMMDD retorna todos os jogos do dia (ao vivo E encerrados).
