@@ -123,12 +123,14 @@ function TeamLogo({
 
 export function Apostar({ isDark, user, onRoundLoad, onPointsChange }: ApostarProps) {
   const d = isDark;
-  const { matches, loading, error, rodada, setRodada, refresh } = useRodada();
+  const [anchorTs, setAnchorTs] = useState(Date.now());
+  const { data, loading, error, refetch: refresh } = useRodada(anchorTs);
+  const matches = data?.matches || [];
+  const rodada = Number(data?.roundNumber || 0);
   const [activeScores, setActiveScores] = useState<Record<string, { home: string; away: string }>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
-  const [anchorTs, setAnchorTs] = useState(Date.now());
 
   useEffect(() => {
     if (rodada && onRoundLoad) onRoundLoad(rodada);
@@ -177,7 +179,8 @@ export function Apostar({ isDark, user, onRoundLoad, onPointsChange }: ApostarPr
   const handleSave = async (match: Match) => {
     if (!user || isSaving) return;
     const score = activeScores[match.id];
-    if (!score || score.home === "" || score.away === "") return;
+    const isBettingOpen = user?.is_admin || liberatedIds.includes(match.id);
+    if (!score || score.home === "" || score.away === "" || !isBettingOpen) return;
 
     setIsSaving(true);
     try {
@@ -213,21 +216,21 @@ export function Apostar({ isDark, user, onRoundLoad, onPointsChange }: ApostarPr
     <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full px-4 py-6 gap-6">
       {/* Header Rodada */}
       <div className="flex items-center justify-between bg-amber-400/5 p-4 rounded-3xl border border-amber-400/10 backdrop-blur-sm">
-         <button onClick={() => setRodada(prev => Math.max(1, prev - 1))} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
+         <button onClick={() => setAnchorTs(prev => prev - 7 * 24 * 60 * 60 * 1000)} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
             <ChevronLeft size={20} className="text-amber-400" />
          </button>
          <div className="text-center">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-400/60">Brasileirão 2024</p>
             <h2 className="text-xl font-black" style={{ color: T.text(d) }}>Rodada {rodada}</h2>
          </div>
-         <button onClick={() => setRodada(prev => prev + 1)} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
+         <button onClick={() => setAnchorTs(prev => prev + 7 * 24 * 60 * 60 * 1000)} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
             <ChevronRight size={20} className="text-amber-400" />
          </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {matches.map((m) => {
-          const isLiberated = liberatedIds.includes(m.id);
+          const isBettingOpen = user?.is_admin || liberatedIds.includes(m.id);
           const score = activeScores[m.id] || { home: "", away: "" };
           
           return (
@@ -235,7 +238,7 @@ export function Apostar({ isDark, user, onRoundLoad, onPointsChange }: ApostarPr
               className="group p-5 rounded-[2rem] border transition-all hover:scale-[1.01] relative overflow-hidden"
               style={{ background: T.surface(d), borderColor: T.border(d) }}
             >
-              {!isLiberated && (
+              {!isBettingOpen && (
                 <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[2px] z-10 flex flex-col items-center justify-center gap-2 p-6 text-center">
                    <div className="w-12 h-12 rounded-2xl bg-slate-900 flex items-center justify-center border border-white/10">
                       <Zap size={24} className="text-amber-400 opacity-50" />
@@ -279,7 +282,7 @@ export function Apostar({ isDark, user, onRoundLoad, onPointsChange }: ApostarPr
                 </div>
               </div>
 
-              {isLiberated && (
+              {isBettingOpen && (
                  <button onClick={() => handleSave(m)} disabled={isSaving || score.home==="" || score.away===""}
                   className="w-full mt-6 py-3 rounded-2xl bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider transition-all active:scale-95 disabled:opacity-20"
                  >

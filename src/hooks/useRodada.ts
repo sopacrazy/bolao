@@ -132,7 +132,7 @@ async function espnDateRange(
   return { matches: parseMatches(events), roundNumber };
 }
 
-export function useRodada(anchorTs: number, league: League = "bra.1") {
+export function useRodada(anchorTs: number = Date.now(), league: League = "bra.1") {
   const [data, setData] = useState<RodadaData | null>(null);
   const [dbResults, setDbResults] = useState<Record<string, { homeScore: string; awayScore: string }>>({});
   const [loading, setLoading] = useState(true);

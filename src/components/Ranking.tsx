@@ -95,7 +95,7 @@ export function Ranking({
           </div>
         </div>
 
-        <div className="divide-y" style={{ divideColor: T.border(d) }}>
+        <div className="divide-y" style={{ borderColor: T.border(d) }}>
           {list.map((user, idx) => {
             const rank = idx + 4;
             const isMe = currentUser?.id === user.id;

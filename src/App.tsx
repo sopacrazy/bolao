@@ -40,6 +40,7 @@ import {
   Bot,
   Flag,
   Zap,
+  ClipboardList,
 } from "lucide-react";
 import { supabase } from "./lib/supabase";
 import { domToPng } from "modern-screenshot";
@@ -2107,6 +2108,7 @@ function Apostar({
     };
 
     fetchDbResults();
+    fetchLiberated(); // Garante que carrega ao montar
     const id = setInterval(fetchDbResults, 30000);
     return () => clearInterval(id);
   }, []);
@@ -2187,6 +2189,7 @@ function Apostar({
     ...(espn.data?.matches ?? []).map((m) => ({ ...m, league: "bra.1" as const })),
     ...(isCurrentRound ? (seriec.data?.matches ?? []).map((m) => ({ ...m, league: "bra.3" as const })) : []),
   ];
+  const isAdmin = user?.cargo?.toLowerCase() === "adm";
   const matches = rawMatches.filter(
     (m) => liberatedIds.includes(m.id) || !isCurrentRound,
   );
@@ -2333,7 +2336,7 @@ function Apostar({
   const roundStarted = isCurrentRound && activeMatches.some(
     (m) => m.status !== "STATUS_SCHEDULED"
   );
-  const activeIsLocked = MOCK_TEST ? true : (isLocked || roundStarted);
+  const activeIsLocked = MOCK_TEST ? true : (isLocked || (roundStarted && !isAdmin));
   // ── fim MOCK TEST ──────────────────────────────────────────────────────────
 
 
@@ -3087,6 +3090,7 @@ function Apostar({
                       gols_home: parseInt(scores[m.id].home),
                       gols_away: parseInt(scores[m.id].away),
                       league: m.league ?? "bra.1",
+                      pago: true,
                     }));
 
                     const { error: upsertError } = await supabase
@@ -3416,7 +3420,7 @@ function Ranking({ isDark, user }: { isDark: boolean; user: any }) {
           .from("usuarios")
           .select("id, nome, apelido")
           .eq("status", "aprovado"),
-        supabase.from("palpites").select("usuario_id, pontos").eq("pago", true),
+        supabase.from("palpites").select("usuario_id, pontos"),
       ]);
       if (!users) {
         setLoadingRank(false);
@@ -4218,7 +4222,7 @@ function ManualMatchesAdmin({
 
 // ─── Admin Panel ─────────────────────────────────────────────────────────────
 
-function AdminPanel({ isDark }: { isDark: boolean }) {
+function AdminPanel({ isDark, onAlert }: { isDark: boolean; onAlert: (cfg: { title: string; message: string; type: 'success' | 'error' }) => void }) {
   const d = isDark;
   const [admTab, setAdmTab] = useState<"dashboard" | "pending" | "bets" | "jogos" | "usuarios">(
     "dashboard",
@@ -4281,8 +4285,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     const { data: allUsersData } = await supabase
       .from("usuarios")
       .select("id, nome, sobrenome, apelido, email, cargo, status")
-      .in("status", ["aprovado", "pendente"])
-      .not("cargo", "like", "dependente:%");
+      .in("status", ["aprovado", "pendente"]);
 
     const usersWithBets = new Set(
       (betsData || []).map((b: any) => b.usuario_id),
@@ -4292,14 +4295,14 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       if (b.pago) userPaidMap[b.usuario_id] = true;
     });
 
+    const finalAppUsers = (appUsers || []).map(u => ({
+      ...u,
+      isPaid: !!userPaidMap[u.id],
+      hasBets: usersWithBets.has(u.id)
+    }));
+    
     setPending(pendUsers || []);
-    setUsers((appUsers || [])
-      .filter((u) => usersWithBets.has(u.id))
-      .map(u => ({
-        ...u,
-        isPaid: !!userPaidMap[u.id]
-      }))
-    );
+    setUsers(finalAppUsers); // Mostra todos os aprovados e dependentes
     setAllUsers(allUsersData || []);
     setTotalBets(betsData?.length || 0);
     setUserTotal(allUsersData?.filter((u: any) => u.status === "aprovado").length || 0);
@@ -4313,6 +4316,53 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
     setLoading(false);
   };
 
+  const recalculateAllPoints = async () => {
+    onAlert({ title: "Processando", message: "Recalculando pontos de todos os usuários...", type: 'success' });
+    setLoading(true);
+    try {
+      const [{ data: allBets }, { data: allResults }] = await Promise.all([
+        supabase.from("palpites").select("*"),
+        supabase.from("resultados_rodada").select("*")
+      ]);
+
+      if (!allBets || !allResults) return;
+
+      const resultsMap: Record<string, any> = {};
+      allResults.forEach(r => { resultsMap[r.match_id] = r; });
+
+      const updates = allBets
+        .map(b => {
+          const res = resultsMap[b.match_id];
+          if (!res) return null;
+          
+          const m: any = {
+            homeScore: String(res.home_score),
+            awayScore: String(res.away_score),
+            status: "STATUS_FINAL"
+          };
+          const bet = { home: String(b.gols_home), away: String(b.gols_away) };
+          const pts = calcPoints(bet, m).pts;
+          
+          return { ...b, pontos: pts };
+        })
+        .filter(Boolean);
+
+      if (updates && updates.length > 0) {
+        const { error } = await supabase.from("palpites").upsert(updates);
+        if (error) throw error;
+        onAlert({ title: "Sucesso", message: `${updates.length} palpites recalculados com sucesso!`, type: 'success' });
+      } else {
+        onAlert({ title: "Info", message: "Nenhum palpite pendente de cálculo encontrado.", type: 'success' });
+      }
+    } catch (err) {
+      console.error("Erro ao recalcular:", err);
+      onAlert({ title: "Erro", message: "Falha ao recalcular pontos.", type: 'error' });
+    } finally {
+      setLoading(false);
+      await fetchData();
+    }
+  };
+
   const togglePayment = async (userId: string, currentPaid: boolean) => {
     setLoading(true);
     const { error } = await supabase
@@ -4322,7 +4372,7 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       .in("match_id", selectedMatchIds);
     
     if (error) {
-      alert("Erro ao atualizar pagamento. Verifique se a coluna 'pago' existe na tabela 'palpites'.");
+      onAlert({ title: "Erro no Pagamento", message: "Erro ao atualizar pagamento. Verifique se a coluna 'pago' existe na tabela 'palpites'.", type: 'error' });
     }
     await fetchData();
     // Se estiver visualizando o usuário, atualiza o objeto local
@@ -4368,11 +4418,11 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
       .eq("usuario_id", confirmDelete.id);
     setDeleting(false);
     if (error || count === 0) {
-      alert(
-        "Não foi possível excluir os palpites.\n\n" +
-          "Execute no Supabase SQL Editor:\n" +
-          "ALTER TABLE palpites DISABLE ROW LEVEL SECURITY;",
-      );
+      onAlert({ 
+        title: "Erro na Exclusão", 
+        message: "Não foi possível excluir os palpites. Verifique as permissões de RLS no Supabase.", 
+        type: 'error' 
+      });
       setConfirmDelete(null);
       return;
     }
@@ -4452,6 +4502,12 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                 <p className="text-2xl font-black" style={{ color: T.text(d) }}>
                   {totalBets}
                 </p>
+                <button 
+                  onClick={recalculateAllPoints}
+                  className="mt-2 text-[9px] font-black uppercase text-amber-400 hover:underline"
+                >
+                  Recalcular Pontos
+                </button>
               </div>
             </div>
 
@@ -4804,12 +4860,17 @@ function AdminPanel({ isDark }: { isDark: boolean }) {
                         >
                           {u.nome} {u.sobrenome}
                         </p>
-                        <p
-                          className="text-xs"
-                          style={{ color: T.textMuted(d) }}
-                        >
-                          @{u.apelido}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <p
+                            className="text-xs"
+                            style={{ color: T.textMuted(d) }}
+                          >
+                            @{u.apelido}
+                          </p>
+                          {u.cargo.startsWith("dependente:") && (
+                            <span className="px-1.5 py-0.5 rounded-md bg-purple-500/10 text-purple-400 text-[8px] font-bold border border-purple-500/20">DEP</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -5310,7 +5371,7 @@ function UserBetsList({
         {/* Match cards */}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {roundMatches.map((m) => {
-            const bet = bets.find((b: any) => b.match_id === m.id);
+            const bet = bets.find((b: any) => String(b.match_id) === String(m.id));
             const hasBet = !!bet;
             return (
               <div key={m.id} style={{
@@ -5380,7 +5441,7 @@ function UserBetsList({
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
       {roundMatches.map((m) => {
-        const bet = bets.find((b: any) => b.match_id === m.id);
+        const bet = bets.find((b: any) => String(b.match_id) === String(m.id));
         const hasBet = !!bet;
         return (
           <div
@@ -5470,6 +5531,194 @@ function UserBetsList({
     </div>
   );
 }
+// ─── Placar ───────────────────────────────────────────────────────────────────
+
+function Placar({ isDark, user, onAlert }: { isDark: boolean; user: any; onAlert: (cfg: { title: string; message: string; type: 'success' | 'error' }) => void }) {
+  const d = isDark;
+  const [anchorTs, setAnchorTs] = useState(Date.now());
+  const espn = useRodada(anchorTs, "bra.1");
+  const rodada = Number(espn.data?.roundNumber || 0);
+
+  const [liberatedIds, setLiberatedIds] = useState<string[]>([]);
+  const [realScores, setRealScores] = useState<Record<string, { home: string; away: string }>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // 1. Busca jogos liberados pelo admin
+  useEffect(() => {
+    const fetchLiberated = async () => {
+      const { data } = await supabase
+        .from("jogos_selecionados")
+        .select("match_id")
+        .eq("liberado", true);
+      if (data) setLiberatedIds(data.map((x: any) => x.match_id));
+    };
+    fetchLiberated();
+  }, [anchorTs]);
+
+  const matches = (espn.data?.matches || []).filter(m => liberatedIds.includes(m.id));
+
+  useEffect(() => {
+    if (matches.length > 0) {
+      const scores: Record<string, { home: string; away: string }> = {};
+      matches.forEach(m => {
+        scores[m.id] = { home: "", away: "" };
+      });
+      setRealScores(scores);
+    }
+  }, [matches.length, anchorTs, liberatedIds]);
+
+  const setScore = (matchId: string, side: "home" | "away", val: string) => {
+    const v = val.replace(/\D/g, "").substring(0, 2);
+    setRealScores(prev => ({
+      ...prev,
+      [matchId]: {
+        ...(prev[matchId] || { home: "", away: "" }),
+        [side]: v
+      }
+    }));
+
+    // Auto-focus logic
+    if (v.length >= 1) {
+      const currentIndex = matches.findIndex(m => m.id === matchId);
+      if (side === "home") {
+        inputRefs.current[`${matchId}-away`]?.focus();
+      } else if (currentIndex < matches.length - 1) {
+        const nextMatchId = matches[currentIndex + 1].id;
+        inputRefs.current[`${nextMatchId}-home`]?.focus();
+      }
+    }
+  };
+
+  const handleSaveAll = async () => {
+    if (!user || isSaving) return;
+    
+    const toSave = matches
+      .filter(m => realScores[m.id]?.home !== "" && realScores[m.id]?.away !== "")
+      .map(m => ({
+        match_id: m.id,
+        home_team: m.home,
+        away_team: m.away,
+        home_name: m.homeName,
+        away_name: m.awayName,
+        home_logo: m.homeLogo,
+        away_logo: m.awayLogo,
+        home_score: parseInt(realScores[m.id].home),
+        away_score: parseInt(realScores[m.id].away),
+        match_date: m.date,
+        league: m.league || "bra.1",
+        round_number: rodada
+      }));
+
+    if (toSave.length === 0) return;
+
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from("resultados_rodada")
+        .upsert(toSave, { onConflict: "match_id" });
+
+      if (error) throw error;
+      onAlert({ title: "Resultados Salvos", message: `${toSave.length} resultados foram registrados e as pontuações atualizadas!`, type: 'success' });
+    } catch (err) {
+      console.error("Erro ao salvar resultados:", err);
+      onAlert({ title: "Erro ao Salvar", message: "Ocorreu um erro ao registrar os resultados no banco de dados.", type: 'error' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (espn.loading) return (
+    <div className="py-20 flex flex-col items-center gap-3 opacity-40">
+      <RefreshCw size={24} className="animate-spin text-amber-400" />
+      <p className="text-[10px] font-black uppercase tracking-widest">Carregando jogos liberados...</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-amber-400/10 p-4 rounded-2xl border border-amber-400/20 flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-amber-400 flex items-center justify-center text-slate-900">
+          <Zap size={18} />
+        </div>
+        <div className="flex-1">
+          <p className="text-xs font-black uppercase text-amber-400">Modo Administrador</p>
+          <p className="text-[10px] opacity-60" style={{ color: T.text(d) }}>Defina os placares finais dos jogos selecionados.</p>
+        </div>
+        <button 
+          onClick={handleSaveAll}
+          disabled={isSaving || matches.length === 0}
+          className="px-4 py-2 bg-amber-400 text-slate-900 rounded-xl font-black text-[10px] uppercase shadow-lg shadow-amber-400/20 active:scale-95 disabled:opacity-30 transition-all"
+        >
+          {isSaving ? "Salvando..." : "Salvar Tudo"}
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between bg-amber-400/5 p-4 rounded-3xl border border-amber-400/10">
+         <button onClick={() => setAnchorTs(prev => prev - 7 * 24 * 60 * 60 * 1000)} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
+            <ChevronLeft size={20} className="text-amber-400" />
+         </button>
+         <div className="text-center">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-400/60">Rodada Selecionada</p>
+            <h2 className="text-xl font-black" style={{ color: T.text(d) }}>Rodada {rodada}</h2>
+         </div>
+         <button onClick={() => setAnchorTs(prev => prev + 7 * 24 * 60 * 60 * 1000)} className="p-3 rounded-2xl hover:bg-amber-400/20 transition-all">
+            <ChevronRight size={20} className="text-amber-400" />
+         </button>
+      </div>
+
+      {matches.length === 0 ? (
+        <div className="py-20 text-center opacity-40 border-2 border-dashed rounded-[2rem]" style={{ borderColor: T.border(d) }}>
+           <p className="text-xs font-bold" style={{ color: T.text(d) }}>Nenhum jogo liberado nesta rodada.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {matches.map((m) => {
+            const score = realScores[m.id] || { home: "", away: "" };
+            return (
+              <motion.div key={m.id} className="p-5 rounded-[2rem] border" style={{ background: T.surface(d), borderColor: T.border(d) }}>
+                <div className="flex items-center justify-between mb-6 opacity-40">
+                  <span className="text-[10px] font-bold">{m.status === "STATUS_FINAL" ? "Concluído" : "Agendado"}</span>
+                  <span className="text-[10px] font-bold">{fmtDate(m.date)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex flex-col items-center gap-2 flex-1">
+                    <TeamLogo src={m.homeLogo} abbr={m.home} isDark={isDark} />
+                    <span className="text-xs font-black truncate text-center w-full" style={{ color: T.text(d) }}>{m.homeName}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <input 
+                      ref={el => inputRefs.current[`${m.id}-home`] = el}
+                      type="text" value={score.home} onChange={e => setScore(m.id, "home", e.target.value)}
+                      placeholder="0" className="w-12 h-12 rounded-2xl text-center text-xl font-black outline-none"
+                      style={{ background: T.inputBg(d), border: `2px solid ${score.home ? "#22C55E55" : T.inputBdr(d)}`, color: T.text(d) }}
+                     />
+                     <div className="flex flex-col gap-1">
+                        <div className="w-1 h-1 rounded-full bg-amber-400/30" />
+                        <div className="w-1 h-1 rounded-full bg-amber-400/30" />
+                     </div>
+                     <input 
+                      ref={el => inputRefs.current[`${m.id}-away`] = el}
+                      type="text" value={score.away} onChange={e => setScore(m.id, "away", e.target.value)}
+                      placeholder="0" className="w-12 h-12 rounded-2xl text-center text-xl font-black outline-none"
+                      style={{ background: T.inputBg(d), border: `2px solid ${score.away ? "#22C55E55" : T.inputBdr(d)}`, color: T.text(d) }}
+                     />
+                  </div>
+                  <div className="flex flex-col items-center gap-2 flex-1">
+                    <TeamLogo src={m.awayLogo} abbr={m.away} isDark={isDark} />
+                    <span className="text-xs font-black truncate text-center w-full" style={{ color: T.text(d) }}>{m.awayName}</span>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ─── Analista IA View ────────────────────────────────────────────────────────
 function AnalistaView({ 
@@ -5568,17 +5817,18 @@ function AnalistaView({
 const tabs = [
   { key: "apostar", label: "Palpites", Icon: Target },
   { key: "ranking", label: "Ranking", Icon: Trophy },
-  // { key: "analista", label: "Analista IA", Icon: Bot },
+  { key: "placar", label: "Placar", Icon: ClipboardList, adminOnly: true },
   { key: "admin", label: "Painel", Icon: Shield, adminOnly: true },
 ] as const;
 
-type Tab = "apostar" | "ranking" | "analista" | "admin";
+type Tab = "apostar" | "ranking" | "analista" | "admin" | "placar";
 
 const headerContent: Record<Tab, { title: string; sub: string }> = {
   apostar: { title: "", sub: "Faça seus palpites" },
   ranking: { title: "Ranking Geral", sub: "Classificação ao vivo" },
   analista: { title: "Analista Pro", sub: "Inteligência de Dados" },
   admin: { title: "Administrador", sub: "Gerenciar rodadas" },
+  placar: { title: "Resultados", sub: "Definir placares oficiais" },
 };
 
 export default function App() {
@@ -6118,7 +6368,18 @@ export default function App() {
                 exit={{ opacity: 0, x: 12 }}
                 transition={{ duration: 0.2 }}
               >
-                <AdminPanel isDark={isDark} />
+                <AdminPanel isDark={isDark} onAlert={setCustomAlert} />
+              </motion.div>
+            )}
+            {tab === "placar" && (
+              <motion.div
+                key="placar"
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 12 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Placar isDark={isDark} user={activeProfile} onAlert={setCustomAlert} />
               </motion.div>
             )}
           </AnimatePresence>
